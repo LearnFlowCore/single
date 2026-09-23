@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход · AutoPoster</title>
+  <link rel="stylesheet" href="/static/site.css">
+</head>
+<body class="auth-page">
+  <main class="login-card">
+    <a class="brand dark" href="/"><span>AP</span> AutoPoster</a>
+    <p class="eyebrow">Закрытая зона</p>
+    <h1>Вход в панель</h1>
+    {% if not configured %}<div class="notice error">Сервер не настроен: задайте переменную <code>AUTOPOSTER_WEB_PASSWORD</code>.</div>{% endif %}
+    {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+    <form method="post" action="/login">
+      <label>Пароль администратора<input type="password" name="password" required autofocus autocomplete="current-password"></label>
+      <button class="button primary full" type="submit">Войти</button>
+    </form>
+  </main>
+</body>
+</html>

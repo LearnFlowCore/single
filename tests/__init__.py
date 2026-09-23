@@ -1,0 +1,1 @@
+"""AutoPoster tests."""
