@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход через ВКонтакте</title>
+  <link rel="stylesheet" href="/static/site.css">
+</head>
+<body class="auth-page">
+  <main class="login-card">
+    <p class="eyebrow">ВКонтакте</p>
+    <h1 id="oauth-title">Завершаем вход</h1>
+    <p id="oauth-status" class="section-note">Передаём разрешение в веб-кабинет...</p>
+  </main>
+  <script>
+    (() => {
+      const targetOrigin = {{ target_origin|tojson }};
+      const values = new URLSearchParams(window.location.hash.slice(1));
+      const accessToken = values.get('access_token');
+      const state = values.get('state');
+      const error = values.get('error_description') || values.get('error');
+      const status = document.getElementById('oauth-status');
+      history.replaceState(null, '', window.location.pathname);
+
+      if (!window.opener) {
+        status.textContent = 'Окно кабинета не найдено. Закройте эту страницу и повторите вход из кабинета.';
+        return;
+      }
+      window.opener.postMessage({
+        type: 'autoposter-vk-oauth',
+        state,
+        accessToken,
+        error: error || (!accessToken ? 'VK не вернул разрешение на доступ.' : '')
+      }, targetOrigin);
+      status.textContent = error ? 'ВКонтакте отклонил авторизацию.' : 'Вход выполнен. Это окно можно закрыть.';
+      if (!error && accessToken) setTimeout(() => window.close(), 700);
+    })();
+  </script>
+</body>
+</html>

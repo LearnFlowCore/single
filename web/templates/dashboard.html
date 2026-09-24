@@ -44,9 +44,9 @@
           {% endfor %}
           {% if platform == 'vk' %}
           <div class="token-help">
-            <strong>Если токен недействителен или истёк</strong>
-            <p>Введите ID вашего standalone-приложения VK и нажмите кнопку ниже. Разрешите доступ, затем скопируйте весь адрес открывшейся страницы с <code>access_token=...</code> в поле «Личный токен VK».</p>
-            <button id="vk-oauth-button" class="button secondary" type="button">Получить новый токен VK</button>
+            <strong>Вход через личный кабинет ВКонтакте</strong>
+            <p>Введите ID приложения VK и нажмите кнопку ниже. В приложении VK должен быть разрешён адрес <code>{{ vk_oauth_redirect_uri }}</code>. После входа разрешение сохранится автоматически.</p>
+            <button id="vk-oauth-button" class="button secondary" type="button">Войти через ВКонтакте</button>
             <p id="vk-oauth-error" class="form-error" role="alert" hidden></p>
           </div>
           {% endif %}
@@ -100,6 +100,9 @@
     const draftKey = 'autoposter-post-draft';
     const credentialsKey = 'autoposter-browser-credentials';
     const pendingCredentialsKey = 'autoposter-pending-credentials';
+    const vkOauthStateKey = 'autoposter-vk-oauth-state';
+    const vkOauthRedirectUri = {{ vk_oauth_redirect_uri|tojson }};
+    const vkOauthOrigin = new URL(vkOauthRedirectUri).origin;
     const settingsSaved = {{ 'true' if settings_saved else 'false' }};
     const settingsFailed = {{ 'true' if error and error_target == 'settings' else 'false' }};
     let browserCredentials = {};
@@ -172,15 +175,48 @@
         return;
       }
       oauthError.hidden = true;
+      const randomValues = new Uint32Array(4);
+      crypto.getRandomValues(randomValues);
+      const state = Array.from(randomValues, (value) => value.toString(16).padStart(8, '0')).join('');
+      sessionStorage.setItem(vkOauthStateKey, state);
       const query = new URLSearchParams({
         client_id: clientId,
         scope: 'wall,photos,offline',
-        redirect_uri: 'https://oauth.vk.com/blank.html',
+        redirect_uri: vkOauthRedirectUri,
         display: 'page',
         response_type: 'token',
-        v: '5.131'
+        v: '5.131',
+        state
       });
-      window.open(`https://oauth.vk.com/authorize?${query}`, '_blank', 'noopener');
+      const popup = window.open(
+        `https://oauth.vk.com/authorize?${query}`,
+        'autoposter-vk-oauth',
+        'popup=yes,width=720,height=760'
+      );
+      if (!popup) {
+        oauthError.textContent = 'Яндекс.Браузер заблокировал окно авторизации. Разрешите всплывающие окна для этого сайта.';
+        oauthError.hidden = false;
+      }
+    });
+    window.addEventListener('message', (event) => {
+      if (event.origin !== vkOauthOrigin || event.data?.type !== 'autoposter-vk-oauth') return;
+      const oauthError = document.getElementById('vk-oauth-error');
+      const expectedState = sessionStorage.getItem(vkOauthStateKey);
+      if (!expectedState || event.data.state !== expectedState) {
+        oauthError.textContent = 'Не удалось подтвердить запрос авторизации VK. Повторите вход.';
+        oauthError.hidden = false;
+        return;
+      }
+      sessionStorage.removeItem(vkOauthStateKey);
+      if (event.data.error || !event.data.accessToken) {
+        oauthError.textContent = event.data.error || 'VK не вернул разрешение на доступ.';
+        oauthError.hidden = false;
+        return;
+      }
+      document.getElementById('vk-access_token').value = event.data.accessToken;
+      oauthError.hidden = true;
+      if (settingsForm.requestSubmit) settingsForm.requestSubmit();
+      else settingsForm.submit();
     });
     publishForm.addEventListener('submit', (event) => {
       const selected = [...publishForm.querySelectorAll('input[name="platforms"]:checked')]

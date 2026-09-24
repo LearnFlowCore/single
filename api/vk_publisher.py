@@ -199,7 +199,11 @@ class VKPublisher(SocialPlatform):
             message = error.get("error_msg") or "unknown VK API error"
             code = error.get("error_code")
             if code == 5:
-                raise AuthenticationError("Токен VK недействителен или истёк. Получите новый токен.")
+                raise AuthenticationError(
+                    "VK отклонил токен (ошибка 5). "
+                    f"Причина VK: {message}. "
+                    "Получите новый пользовательский токен standalone-приложения без привязки к IP."
+                )
             if code == 7:
                 raise AuthenticationError("Токен VK не имеет нужных прав wall/photos.")
             if code == 15:

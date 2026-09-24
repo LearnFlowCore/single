@@ -6,8 +6,10 @@ import unittest
 from pathlib import Path
 
 import httpx
+from fastapi.testclient import TestClient
 from PIL import Image
 
+from api.base import AuthenticationError
 from api.instagram_publisher import InstagramPublisher
 from api.max_publisher import MaxPostData, MaxPublisher
 from api.telegram_publisher import TelegramPostData, TelegramPublisher
@@ -15,7 +17,7 @@ from api.vk_publisher import VKPostData, VKPublisher
 from utils.auth import SecretStore, extract_vk_access_token
 from utils.media import prepare_media_for_publish, validate_media
 from utils.network import resolve_network
-from web.app import _credential_view, _merge_browser_credentials, _update_credentials
+from web.app import app, _credential_view, _merge_browser_credentials, _update_credentials
 
 
 class CoreTests(unittest.TestCase):
@@ -89,6 +91,15 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(stored["vk"]["access_token"], "personal-token")
         self.assertIn(("vk", "access_token"), changed)
+
+    def test_vk_oauth_callback_is_public_and_not_cached(self) -> None:
+        with TestClient(app) as client:
+            response = client.get("/vk/oauth/callback")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertIn("autoposter-vk-oauth", response.text)
+        self.assertIn("http://158.160.237.113", response.text)
 
     def test_browser_credentials_restore_token_for_publish(self) -> None:
         stored = SecretStore(Path("missing-secrets.json")).load()
@@ -240,6 +251,27 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
                 calls,
                 ["/method/users.get", "/method/account.getAppPermissions", "/method/wall.post"],
             )
+        finally:
+            await publisher.aclose()
+
+    async def test_vk_authentication_reports_api_reason(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "error": {
+                        "error_code": 5,
+                        "error_msg": "User authorization failed: access_token was given to another ip address.",
+                    }
+                },
+            )
+
+        publisher = VKPublisher("token")
+        await publisher._client.aclose()
+        publisher._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        try:
+            with self.assertRaisesRegex(AuthenticationError, "another ip address"):
+                await publisher.authenticate()
         finally:
             await publisher.aclose()
 

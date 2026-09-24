@@ -1,0 +1,21 @@
+[Unit]
+Description=Okno v drugoi mir web application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lnr1
+Group=lnr1
+WorkingDirectory=/home/lnr1/autoposter
+EnvironmentFile=/home/lnr1/autoposter.env
+ExecStart=/home/lnr1/autoposter/.venv/bin/python web_main.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/home/lnr1/autoposter-data
+
+[Install]
+WantedBy=multi-user.target

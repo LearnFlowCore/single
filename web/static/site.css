@@ -18,6 +18,7 @@ button,input,textarea,select { font:inherit; }
 .hero { position:relative; min-height:calc(100vh - 126px); max-width:1260px; margin:auto; padding:clamp(70px,10vh,130px) 34px 80px; display:grid; grid-template-columns:minmax(0,1.25fr) minmax(320px,.75fr); gap:clamp(50px,8vw,120px); align-items:center; }
 .hero::after { position:absolute; top:12%; left:2%; width:190px; height:5px; content:""; background:var(--yellow); box-shadow:58px 14px 0 #ffd84d66,124px -9px 0 #ffd84d30; }
 .eyebrow { margin:0 0 14px; color:var(--yellow); font-size:11px; font-weight:900; letter-spacing:.2em; text-transform:uppercase; }
+.landing .hero .eyebrow { transform:translateY(-28px); }
 .hero h1 { max-width:780px; margin:0; color:var(--yellow); font:900 clamp(54px,7.4vw,102px)/.9 "Arial Black","Segoe UI Variable",sans-serif; letter-spacing:-.065em; text-wrap:balance; }
 .hero h1 em { display:inline-block; color:var(--yellow); font-style:normal; font-weight:900; }
 @supports (-webkit-text-stroke:2px var(--yellow)) { .hero h1 em { color:transparent; -webkit-text-stroke:2px var(--yellow); } }

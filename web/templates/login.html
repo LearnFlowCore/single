@@ -13,9 +13,9 @@
     <h1>Вход в панель</h1>
     {% if not configured %}<div class="notice error">Сервер не настроен: задайте переменные <code>AUTOPOSTER_WEB_USERNAME</code> и <code>AUTOPOSTER_WEB_PASSWORD</code>.</div>{% endif %}
     {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
-    <form method="post" action="/login">
-      <label>Логин администратора<input type="text" name="username" required autofocus autocomplete="username"></label>
-      <label>Пароль администратора<input type="password" name="password" required autocomplete="current-password"></label>
+    <form method="post" action="/login" autocomplete="off">
+      <label>Логин администратора<input type="text" name="username" required autofocus autocomplete="off" autocapitalize="none" spellcheck="false"></label>
+      <label>Пароль администратора<input type="password" name="password" required autocomplete="off"></label>
       <button class="button primary full" type="submit">Войти</button>
     </form>
   </main>
