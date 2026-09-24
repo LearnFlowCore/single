@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import secrets as random_secrets
 from collections.abc import Mapping
@@ -156,6 +157,7 @@ async def publish(
     text: Annotated[str, Form()] = "",
     platforms: Annotated[list[str], Form()] = [],
     media: Annotated[list[UploadFile], File()] = [],
+    browser_credentials: Annotated[str, Form()] = "",
 ):  # type: ignore[no-untyped-def]
     if not _authenticated(request):
         return _login_redirect()
@@ -189,7 +191,9 @@ async def publish(
         post_id = repository.create(
             text=text.strip(), media_paths=paths, platforms=selected, status="publishing"
         )
-        results = await publish_post(text.strip(), paths, selected, secret_store.load(), Settings.load())
+        credentials = secret_store.load()
+        _merge_browser_credentials(credentials, browser_credentials)
+        results = await publish_post(text.strip(), paths, selected, credentials, Settings.load())
         all_success = bool(results) and all(item.get("success") for item in results.values())
         status = "success" if all_success else "error"
         repository.update_result(post_id, status, results)
@@ -244,7 +248,7 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
             error=f"Не удалось сохранить настройки на сервере: {exc}",
             error_target="settings",
         )
-    return _dashboard_response(request, message="Настройки сохранены.")
+    return _dashboard_response(request, message="Настройки сохранены.", settings_saved=True)
 
 
 @app.post("/posts/{post_id}/delete")
@@ -273,6 +277,7 @@ def _dashboard_response(
     message: str = "",
     error: str = "",
     error_target: str = "",
+    settings_saved: bool = False,
 ):
     records = repository.recent(50)
     settings = Settings.load()
@@ -284,6 +289,7 @@ def _dashboard_response(
             "message": message,
             "error": error,
             "error_target": error_target,
+            "settings_saved": settings_saved,
             "platforms": PLATFORMS,
             "records": records,
             "settings": settings,
@@ -327,3 +333,26 @@ def _update_credentials(
                 fields[key] = value
                 changed.add((platform, key))
     return changed
+
+
+def _merge_browser_credentials(
+    stored: dict[str, dict[str, str]], raw: str
+) -> None:
+    if not raw:
+        return
+    if len(raw) > 32_768:
+        raise ValueError("Данные подключений из браузера слишком велики")
+    try:
+        browser_values = json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Браузер передал повреждённые данные подключений") from exc
+    if not isinstance(browser_values, dict):
+        raise ValueError("Браузер передал неверный формат подключений")
+    for platform, fields in stored.items():
+        values = browser_values.get(platform, {})
+        if not isinstance(values, dict):
+            continue
+        for key in fields:
+            value = values.get(key)
+            if isinstance(value, str) and value.strip():
+                fields[key] = value.strip()

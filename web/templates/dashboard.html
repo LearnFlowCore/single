@@ -18,6 +18,7 @@
       <div class="section-heading"><p class="eyebrow">Новая публикация</p><h1>Создать пост</h1></div>
       {% if error and error_target == 'publish' %}<div class="notice error inline-notice" role="alert">{{ error }}</div>{% endif %}
       <form id="publish-form" method="post" action="/publish" enctype="multipart/form-data">
+        <input id="browser-credentials" name="browser_credentials" type="hidden" value="">
         <label>Текст<textarea id="post-text" name="text" rows="8" placeholder="О чём расскажем сегодня?"></textarea></label>
         <label>Фото или видео<input type="file" name="media" accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.avif,.mp4" multiple></label>
         <fieldset><legend>Платформы</legend><div class="checks">
@@ -29,13 +30,14 @@
     <section class="settings panel">
       <div class="section-heading"><p class="eyebrow">Подключения</p><h2>Токены и сеть</h2></div>
       <p class="section-note">Токены используются только для публикации и не заменяют логин и пароль этой панели.</p>
+      <p class="browser-storage-note">После проверки подключения токены сохраняются в этом браузере и остаются доступны при следующем открытии приложения.</p>
       {% if error and error_target == 'settings' %}<div class="notice error inline-notice" role="alert">{{ error }}</div>{% endif %}
-      <form method="post" action="/settings" autocomplete="off">
+      <form id="settings-form" method="post" action="/settings" autocomplete="off">
         {% for platform, name in platforms.items() %}
         <details {% if loop.first %}open{% endif %}><summary>{{ name }}</summary><div class="settings-grid">
           {% for field in credentials[platform] %}
           <label>{{ field.label }}
-            <input id="{{ platform }}-{{ field.key }}" class="{{ 'masked-value' if field.secret else '' }}" name="{{ platform }}_{{ field.key }}" type="text" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore placeholder="{{ 'Значение сохранено. Оставьте пустым без изменений' if field.saved else '' }}">
+            <input id="{{ platform }}-{{ field.key }}" class="{{ 'masked-value' if field.secret else '' }}" name="{{ platform }}_{{ field.key }}" type="text" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-credential-platform="{{ platform }}" data-credential-key="{{ field.key }}" data-1p-ignore data-lpignore="true" data-bwignore placeholder="{{ 'Значение сохранено. Оставьте пустым без изменений' if field.saved else '' }}">
             <small>{{ field.hint }}</small>
           </label>
           {% endfor %}
@@ -92,8 +94,12 @@
   </div>
   <script>
     const publishForm = document.getElementById('publish-form');
+    const settingsForm = document.getElementById('settings-form');
     const postText = document.getElementById('post-text');
     const draftKey = 'autoposter-post-draft';
+    const credentialsKey = 'autoposter-browser-credentials';
+    const pendingCredentialsKey = 'autoposter-pending-credentials';
+    const settingsSaved = {{ 'true' if settings_saved else 'false' }};
     try {
       const savedDraft = localStorage.getItem(draftKey);
       if (savedDraft && !postText.value) postText.value = savedDraft;
@@ -103,6 +109,34 @@
       });
     } catch (_) {
       // The form remains usable when browser storage is disabled.
+    }
+    try {
+      const browserCredentials = JSON.parse(localStorage.getItem(credentialsKey) || '{}');
+      const pendingCredentials = JSON.parse(sessionStorage.getItem(pendingCredentialsKey) || '{}');
+      if (settingsSaved) {
+        Object.entries(pendingCredentials).forEach(([platform, values]) => {
+          browserCredentials[platform] = {...(browserCredentials[platform] || {}), ...values};
+        });
+        localStorage.setItem(credentialsKey, JSON.stringify(browserCredentials));
+      }
+      sessionStorage.removeItem(pendingCredentialsKey);
+      document.querySelectorAll('[data-credential-platform]').forEach((input) => {
+        const saved = browserCredentials[input.dataset.credentialPlatform]?.[input.dataset.credentialKey];
+        if (saved) input.placeholder = 'Значение сохранено в этом браузере';
+      });
+      settingsForm.addEventListener('submit', () => {
+        const pending = {};
+        settingsForm.querySelectorAll('[data-credential-platform]').forEach((input) => {
+          const value = input.value.trim();
+          if (!value) return;
+          const platform = input.dataset.credentialPlatform;
+          pending[platform] = pending[platform] || {};
+          pending[platform][input.dataset.credentialKey] = value;
+        });
+        sessionStorage.setItem(pendingCredentialsKey, JSON.stringify(pending));
+      });
+    } catch (_) {
+      // Server-side storage remains available when browser storage is disabled.
     }
     const vkOauthButton = document.getElementById('vk-oauth-button');
     vkOauthButton.addEventListener('click', () => {
@@ -128,6 +162,11 @@
       const selected = [...publishForm.querySelectorAll('input[name="platforms"]:checked')]
         .map((input) => input.nextElementSibling.textContent.trim());
       if (!selected.length) return;
+      try {
+        document.getElementById('browser-credentials').value = localStorage.getItem(credentialsKey) || '';
+      } catch (_) {
+        document.getElementById('browser-credentials').value = '';
+      }
       document.getElementById('publish-platforms').textContent = selected.join(' · ');
       document.getElementById('publish-button').disabled = true;
       const modal = document.getElementById('publish-modal');

@@ -15,7 +15,7 @@ from api.vk_publisher import VKPostData, VKPublisher
 from utils.auth import SecretStore, extract_vk_access_token
 from utils.media import prepare_media_for_publish, validate_media
 from utils.network import resolve_network
-from web.app import _credential_view, _update_credentials
+from web.app import _credential_view, _merge_browser_credentials, _update_credentials
 
 
 class CoreTests(unittest.TestCase):
@@ -89,6 +89,17 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(stored["vk"]["access_token"], "personal-token")
         self.assertIn(("vk", "access_token"), changed)
+
+    def test_browser_credentials_restore_token_for_publish(self) -> None:
+        stored = SecretStore(Path("missing-secrets.json")).load()
+
+        _merge_browser_credentials(
+            stored,
+            json.dumps({"vk": {"access_token": "browser-token", "group_id": "123"}}),
+        )
+
+        self.assertEqual(stored["vk"]["access_token"], "browser-token")
+        self.assertEqual(stored["vk"]["group_id"], "123")
 
     def test_direct_network_ignores_environment(self) -> None:
         network = resolve_network("direct")

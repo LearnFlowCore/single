@@ -41,6 +41,7 @@ input::file-selector-button { color:var(--yellow); background:#252318; border:1p
 .panel.wide { grid-column:1/-1; }
 .section-heading h1,.section-heading h2 { color:var(--yellow); font:700 31px Georgia,serif; margin:0 0 22px; }
 .section-note { margin:-12px 0 18px; font-size:13px; line-height:1.5; opacity:.8; }
+.browser-storage-note { margin:-8px 0 18px; padding:10px 12px; border-left:3px solid var(--yellow); background:#0d0f13; font-size:12px; line-height:1.5; }
 .composer form { display:grid; gap:18px; }
 fieldset { border:0; padding:0; margin:0; } legend { color:var(--yellow); font-size:13px; font-weight:700; margin-bottom:8px; }
 .checks { display:flex; flex-wrap:wrap; gap:8px; }.checks label { display:block; }.checks input { position:absolute; opacity:0; }.checks span { display:block; color:var(--yellow); background:#0d0f13; border:1px solid var(--line); padding:9px 12px; border-radius:3px; cursor:pointer; }.checks input:checked+span { background:#3a3008; border-color:var(--yellow); color:var(--yellow); }
