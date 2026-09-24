@@ -17,6 +17,7 @@
     <section class="composer panel">
       <div class="section-heading"><p class="eyebrow">Новая публикация</p><h1>Создать пост</h1></div>
       {% if error and error_target == 'publish' %}<div class="notice error inline-notice" role="alert">{{ error }}</div>{% endif %}
+      <div id="publish-client-error" class="notice error inline-notice" role="alert" tabindex="-1" hidden></div>
       <form id="publish-form" method="post" action="/publish" enctype="multipart/form-data">
         <input id="browser-credentials" name="browser_credentials" type="hidden" value="">
         <label>Текст<textarea id="post-text" name="text" rows="8" placeholder="О чём расскажем сегодня?"></textarea></label>
@@ -63,7 +64,7 @@
     </section>
     <section class="history panel wide">
       <div class="section-heading"><p class="eyebrow">Последние действия</p><h2>История</h2></div>
-      <div class="table-wrap"><table><thead><tr><th>Дата</th><th>Текст</th><th>Платформы</th><th>Статус</th><th></th></tr></thead><tbody>
+      <div class="table-wrap"><table><caption class="visually-hidden">История публикаций</caption><thead><tr><th scope="col">Дата</th><th scope="col">Текст</th><th scope="col">Платформы</th><th scope="col">Статус</th><th scope="col"><span class="visually-hidden">Действия</span></th></tr></thead><tbody>
       {% for record in records %}<tr class="post-row"><td>{{ record.created_at.strftime('%d.%m.%Y %H:%M') }}</td><td>{{ record.text[:100] }}</td><td>{{ record.platforms|join(', ') }}</td><td><span class="status {{ record.status }}">{{ record.status }}</span></td><td><form class="delete-form" method="post" action="/posts/{{ record.id }}/delete"><button class="delete-button" type="submit" aria-label="Удалить запись">Удалить</button></form></td></tr>{% else %}<tr><td colspan="5">Публикаций пока нет</td></tr>{% endfor %}
       </tbody></table></div>
     </section>
@@ -83,7 +84,7 @@
     <div class="loading-symbol symbol-right loading-decoration" data-decoration="coffee" aria-hidden="true">☕︎</div>
     <div class="loading-symbol symbol-left loading-decoration" data-decoration="emoji" aria-hidden="true">★</div>
     <div class="loading-symbol symbol-right loading-decoration" data-decoration="emoji" aria-hidden="true">★</div>
-    <div class="publish-progress">
+    <div class="publish-progress" tabindex="-1" role="status" aria-live="polite">
       <div class="spinner" aria-hidden="true"></div>
       <p class="eyebrow">Публикация</p>
       <h2 id="publish-title">Отправляем пост</h2>
@@ -100,6 +101,8 @@
     const credentialsKey = 'autoposter-browser-credentials';
     const pendingCredentialsKey = 'autoposter-pending-credentials';
     const settingsSaved = {{ 'true' if settings_saved else 'false' }};
+    const settingsFailed = {{ 'true' if error and error_target == 'settings' else 'false' }};
+    let browserCredentials = {};
     try {
       const savedDraft = localStorage.getItem(draftKey);
       if (savedDraft && !postText.value) postText.value = savedDraft;
@@ -111,18 +114,22 @@
       // The form remains usable when browser storage is disabled.
     }
     try {
-      const browserCredentials = JSON.parse(localStorage.getItem(credentialsKey) || '{}');
-      const pendingCredentials = JSON.parse(sessionStorage.getItem(pendingCredentialsKey) || '{}');
+      const storedValue = JSON.parse(localStorage.getItem(credentialsKey) || '{}');
+      browserCredentials = storedValue && typeof storedValue === 'object' && !Array.isArray(storedValue) ? storedValue : {};
+      const pendingValue = JSON.parse(sessionStorage.getItem(pendingCredentialsKey) || '{}');
+      const pendingCredentials = pendingValue && typeof pendingValue === 'object' && !Array.isArray(pendingValue) ? pendingValue : {};
       if (settingsSaved) {
         Object.entries(pendingCredentials).forEach(([platform, values]) => {
           browserCredentials[platform] = {...(browserCredentials[platform] || {}), ...values};
         });
         localStorage.setItem(credentialsKey, JSON.stringify(browserCredentials));
+        sessionStorage.removeItem(pendingCredentialsKey);
       }
-      sessionStorage.removeItem(pendingCredentialsKey);
       document.querySelectorAll('[data-credential-platform]').forEach((input) => {
         const saved = browserCredentials[input.dataset.credentialPlatform]?.[input.dataset.credentialKey];
         if (saved) input.placeholder = 'Значение сохранено в этом браузере';
+        const pending = pendingCredentials[input.dataset.credentialPlatform]?.[input.dataset.credentialKey];
+        if (settingsFailed && pending) input.value = pending;
       });
       settingsForm.addEventListener('submit', () => {
         const pending = {};
@@ -131,12 +138,29 @@
           if (!value) return;
           const platform = input.dataset.credentialPlatform;
           pending[platform] = pending[platform] || {};
-          pending[platform][input.dataset.credentialKey] = value;
+          const key = input.dataset.credentialKey;
+          if (platform === 'vk' && key === 'access_token') {
+            try {
+              const parsed = new URL(value);
+              const hash = new URLSearchParams(parsed.hash.slice(1));
+              pending[platform][key] = hash.get('access_token') || value;
+            } catch (_) {
+              pending[platform][key] = value.replace(/^(?:access_)?token=/i, '').trim();
+            }
+          } else {
+            pending[platform][key] = value;
+          }
         });
         sessionStorage.setItem(pendingCredentialsKey, JSON.stringify(pending));
       });
     } catch (_) {
-      // Server-side storage remains available when browser storage is disabled.
+      browserCredentials = {};
+      try {
+        localStorage.removeItem(credentialsKey);
+        sessionStorage.removeItem(pendingCredentialsKey);
+      } catch (_) {
+        // Storage can be blocked in private or restricted browser modes.
+      }
     }
     const vkOauthButton = document.getElementById('vk-oauth-button');
     vkOauthButton.addEventListener('click', () => {
@@ -158,12 +182,23 @@
       });
       window.open(`https://oauth.vk.com/authorize?${query}`, '_blank', 'noopener');
     });
-    publishForm.addEventListener('submit', () => {
+    publishForm.addEventListener('submit', (event) => {
       const selected = [...publishForm.querySelectorAll('input[name="platforms"]:checked')]
         .map((input) => input.nextElementSibling.textContent.trim());
-      if (!selected.length) return;
+      const clientError = document.getElementById('publish-client-error');
+      const hasMedia = publishForm.querySelector('input[name="media"]').files.length > 0;
+      if (!selected.length || (!postText.value.trim() && !hasMedia)) {
+        event.preventDefault();
+        clientError.textContent = !selected.length
+          ? 'Выберите хотя бы одну платформу.'
+          : 'Добавьте текст или медиафайл.';
+        clientError.hidden = false;
+        clientError.focus?.();
+        return;
+      }
+      clientError.hidden = true;
       try {
-        document.getElementById('browser-credentials').value = localStorage.getItem(credentialsKey) || '';
+        document.getElementById('browser-credentials').value = JSON.stringify(browserCredentials);
       } catch (_) {
         document.getElementById('browser-credentials').value = '';
       }
@@ -178,6 +213,19 @@
       modal.classList.add('visible');
       modal.setAttribute('aria-hidden', 'false');
       document.body.classList.add('publishing');
+      document.querySelector('.admin-shell').inert = true;
+      document.querySelector('.admin-header').inert = true;
+      document.querySelector('.publish-progress').focus({preventScroll: true});
+    });
+    window.addEventListener('pageshow', () => {
+      const modal = document.getElementById('publish-modal');
+      modal.classList.remove('visible');
+      modal.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('publishing');
+      document.querySelector('.admin-shell').inert = false;
+      document.querySelector('.admin-header').inert = false;
+      document.getElementById('publish-button').disabled = false;
+      modal.querySelectorAll('.loading-decoration').forEach((item) => item.classList.remove('active'));
     });
     document.querySelectorAll('.delete-form').forEach((form) => {
       form.addEventListener('submit', (event) => {

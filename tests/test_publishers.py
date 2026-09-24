@@ -101,6 +101,24 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(stored["vk"]["access_token"], "browser-token")
         self.assertEqual(stored["vk"]["group_id"], "123")
 
+    def test_browser_credentials_normalize_vk_redirect_url(self) -> None:
+        stored = SecretStore(Path("missing-secrets.json")).load()
+
+        _merge_browser_credentials(
+            stored,
+            json.dumps(
+                {
+                    "vk": {
+                        "access_token": (
+                            "https://oauth.vk.com/blank.html#access_token=browser-token&expires_in=0"
+                        )
+                    }
+                }
+            ),
+        )
+
+        self.assertEqual(stored["vk"]["access_token"], "browser-token")
+
     def test_direct_network_ignores_environment(self) -> None:
         network = resolve_network("direct")
         self.assertIsNone(network.proxy)
@@ -177,6 +195,29 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("Текст с картинкой".encode(), body)
                 finally:
                     await publisher.aclose()
+
+    async def test_telegram_media_group_uses_photo_type(self) -> None:
+        captured: dict[str, bytes] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["body"] = request.content
+            return httpx.Response(200, json={"ok": True, "result": [{"message_id": 3}]})
+
+        with tempfile.TemporaryDirectory() as directory:
+            paths: list[str] = []
+            for index in range(2):
+                source = Path(directory) / f"photo{index}.jpg"
+                Image.new("RGB", (320, 240), "yellow").save(source, "JPEG")
+                paths.append(str(source))
+            publisher = TelegramPublisher("token", "@channel")
+            await publisher._client.aclose()
+            publisher._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            try:
+                await publisher.publish(TelegramPostData(text="Альбом", media=paths))
+                self.assertIn(b'\"type\": \"photo\"', captured["body"])
+                self.assertNotIn(b'\"type\": \"image\"', captured["body"])
+            finally:
+                await publisher.aclose()
 
     async def test_vk_text_request(self) -> None:
         calls: list[str] = []

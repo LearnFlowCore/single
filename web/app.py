@@ -161,7 +161,7 @@ async def publish(
 ):  # type: ignore[no-untyped-def]
     if not _authenticated(request):
         return _login_redirect()
-    selected = [name for name in platforms if name in PLATFORMS]
+    selected = list(dict.fromkeys(name for name in platforms if name in PLATFORMS))
     if not selected or (not text.strip() and not any(item.filename for item in media)):
         return _dashboard_response(
             request,
@@ -170,7 +170,10 @@ async def publish(
         )
 
     paths: list[str] = []
+    post_id: int | None = None
     try:
+        credentials = secret_store.load()
+        _merge_browser_credentials(credentials, browser_credentials)
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         for upload in media:
             if not upload.filename:
@@ -179,6 +182,7 @@ async def publish(
             if suffix not in SUPPORTED_EXTENSIONS:
                 raise ValueError(f"Формат {suffix or 'без расширения'} не поддерживается")
             path = UPLOAD_DIR / f"{random_secrets.token_hex(16)}{suffix}"
+            paths.append(str(path))
             size = 0
             with path.open("wb") as target:
                 while chunk := await upload.read(1024 * 1024):
@@ -186,13 +190,9 @@ async def publish(
                     if size > MAX_UPLOAD_BYTES:
                         raise ValueError("Файл превышает 250 МБ")
                     target.write(chunk)
-            paths.append(str(path))
-
         post_id = repository.create(
             text=text.strip(), media_paths=paths, platforms=selected, status="publishing"
         )
-        credentials = secret_store.load()
-        _merge_browser_credentials(credentials, browser_credentials)
         results = await publish_post(text.strip(), paths, selected, credentials, Settings.load())
         all_success = bool(results) and all(item.get("success") for item in results.values())
         status = "success" if all_success else "error"
@@ -205,6 +205,15 @@ async def publish(
             return _dashboard_response(request, message=details)
         return _dashboard_response(request, error=details, error_target="publish")
     except Exception as exc:
+        if post_id is not None:
+            try:
+                repository.update_result(
+                    post_id,
+                    "error",
+                    {"application": {"success": False, "error": str(exc)}},
+                )
+            except Exception:
+                pass
         return _dashboard_response(request, error=str(exc), error_target="publish")
     finally:
         for path_text in paths:
@@ -355,4 +364,7 @@ def _merge_browser_credentials(
         for key in fields:
             value = values.get(key)
             if isinstance(value, str) and value.strip():
-                fields[key] = value.strip()
+                value = value.strip()
+                if platform == "vk" and key == "access_token":
+                    value = extract_vk_access_token(value)
+                fields[key] = value

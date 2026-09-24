@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -105,14 +106,17 @@ class VKPublisher(SocialPlatform):
 
         try:
             attachments = [await self._upload_photo(Path(item)) for item in post.media]
-            params: dict[str, Any] = {"message": post.text}
+            params: dict[str, Any] = {
+                "message": post.text,
+                "random_id": secrets.randbits(31) or 1,
+            }
             if attachments:
                 params["attachments"] = ",".join(attachments)
             if self.group_id is not None:
                 params.update(owner_id=-self.group_id, from_group=1)
             payload = await self._vk_call("wall.post", params, "VK wall post")
             response = payload.get("response")
-            if not isinstance(response, dict):
+            if not isinstance(response, dict) or not response.get("post_id"):
                 raise PublishError("VK wall post returned an unexpected response")
             return response
         except PublishError:

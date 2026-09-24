@@ -114,7 +114,8 @@ class TelegramPublisher(SocialPlatform):
             for index, item in enumerate(media):
                 assert item.path is not None
                 field = f"media{index}"
-                descriptor = {"type": item.kind, "media": f"attach://{field}"}
+                media_type = "photo" if item.kind == "image" else item.kind
+                descriptor = {"type": media_type, "media": f"attach://{field}"}
                 if index == 0 and caption:
                     descriptor["caption"] = caption
                 descriptors.append(descriptor)
