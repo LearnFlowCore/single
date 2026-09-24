@@ -18,7 +18,7 @@
       <div class="section-heading"><p class="eyebrow">Новая публикация</p><h1>Создать пост</h1></div>
       {% if error and error_target == 'publish' %}<div class="notice error inline-notice" role="alert">{{ error }}</div>{% endif %}
       <form id="publish-form" method="post" action="/publish" enctype="multipart/form-data">
-        <label>Текст<textarea name="text" rows="8" placeholder="О чём расскажем сегодня?"></textarea></label>
+        <label>Текст<textarea id="post-text" name="text" rows="8" placeholder="О чём расскажем сегодня?"></textarea></label>
         <label>Фото или видео<input type="file" name="media" accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.avif,.mp4" multiple></label>
         <fieldset><legend>Платформы</legend><div class="checks">
           {% for key, name in platforms.items() %}<label><input type="checkbox" name="platforms" value="{{ key }}"><span>{{ name }}</span></label>{% endfor %}
@@ -70,6 +70,18 @@
   </div>
   <script>
     const publishForm = document.getElementById('publish-form');
+    const postText = document.getElementById('post-text');
+    const draftKey = 'autoposter-post-draft';
+    try {
+      const savedDraft = localStorage.getItem(draftKey);
+      if (savedDraft && !postText.value) postText.value = savedDraft;
+      postText.addEventListener('input', () => {
+        if (postText.value) localStorage.setItem(draftKey, postText.value);
+        else localStorage.removeItem(draftKey);
+      });
+    } catch (_) {
+      // The form remains usable when browser storage is disabled.
+    }
     publishForm.addEventListener('submit', () => {
       const selected = [...publishForm.querySelectorAll('input[name="platforms"]:checked')]
         .map((input) => input.nextElementSibling.textContent.trim());
