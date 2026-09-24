@@ -161,7 +161,11 @@ async def publish(
         return _login_redirect()
     selected = [name for name in platforms if name in PLATFORMS]
     if not selected or (not text.strip() and not any(item.filename for item in media)):
-        return _dashboard_response(request, error="Добавьте текст или медиа и выберите платформу.")
+        return _dashboard_response(
+            request,
+            error="Добавьте текст или медиа и выберите платформу.",
+            error_target="publish",
+        )
 
     paths: list[str] = []
     try:
@@ -195,9 +199,9 @@ async def publish(
         )
         if all_success:
             return _dashboard_response(request, message=details)
-        return _dashboard_response(request, error=details)
+        return _dashboard_response(request, error=details, error_target="publish")
     except Exception as exc:
-        return _dashboard_response(request, error=str(exc))
+        return _dashboard_response(request, error=str(exc), error_target="publish")
     finally:
         for path_text in paths:
             Path(path_text).unlink(missing_ok=True)
@@ -212,7 +216,7 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
     try:
         _update_credentials(stored, form)
     except ValueError as exc:
-        return _dashboard_response(request, error=str(exc))
+        return _dashboard_response(request, error=str(exc), error_target="settings")
     settings = Settings.load()
     settings.network_mode = str(form.get("network_mode", "system"))
     settings.proxy_url = str(form.get("proxy_url", "")).strip()
@@ -221,7 +225,7 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
     try:
         resolve_network(settings.network_mode, settings.proxy_url)
     except ValueError as exc:
-        return _dashboard_response(request, error=str(exc))
+        return _dashboard_response(request, error=str(exc), error_target="settings")
     try:
         secret_store.save(stored)
         settings.save()
@@ -229,6 +233,7 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
         return _dashboard_response(
             request,
             error=f"Не удалось сохранить настройки на сервере: {exc}",
+            error_target="settings",
         )
     return _dashboard_response(request, message="Настройки сохранены.")
 
@@ -253,7 +258,13 @@ async def download():  # type: ignore[no-untyped-def]
     )
 
 
-def _dashboard_response(request: Request, *, message: str = "", error: str = ""):
+def _dashboard_response(
+    request: Request,
+    *,
+    message: str = "",
+    error: str = "",
+    error_target: str = "",
+):
     records = repository.recent(50)
     settings = Settings.load()
     credentials = _credential_view(secret_store.load())
@@ -263,6 +274,7 @@ def _dashboard_response(request: Request, *, message: str = "", error: str = "")
         {
             "message": message,
             "error": error,
+            "error_target": error_target,
             "platforms": PLATFORMS,
             "records": records,
             "settings": settings,

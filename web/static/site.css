@@ -34,6 +34,7 @@ input::file-selector-button { color:var(--yellow); background:#252318; border:1p
 .login-card form { display:grid; gap:18px; }
 .notice { max-width:1180px; margin:18px auto 0; padding:13px 16px; color:var(--yellow); border:1px solid var(--line); border-left:4px solid var(--yellow); background:var(--surface-2); }
 .notice.success,.notice.error { border-left-color:var(--yellow); color:var(--yellow); }
+.inline-notice { width:100%; margin:0 0 18px; }
 .admin-shell { max-width:1240px; margin:0 auto; padding:28px; display:grid; grid-template-columns:1.2fr .8fr; gap:22px; }
 .admin-shell>.notice { grid-column:1/-1; margin:0; width:100%; }
 .panel { background:var(--surface); border:1px solid var(--line); border-radius:5px; padding:26px; }

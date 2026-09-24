@@ -13,9 +13,10 @@
   </header>
   <main class="admin-shell">
     {% if message %}<div class="notice success">{{ message }}</div>{% endif %}
-    {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+    {% if error and not error_target %}<div class="notice error">{{ error }}</div>{% endif %}
     <section class="composer panel">
       <div class="section-heading"><p class="eyebrow">Новая публикация</p><h1>Создать пост</h1></div>
+      {% if error and error_target == 'publish' %}<div class="notice error inline-notice" role="alert">{{ error }}</div>{% endif %}
       <form id="publish-form" method="post" action="/publish" enctype="multipart/form-data">
         <label>Текст<textarea name="text" rows="8" placeholder="О чём расскажем сегодня?"></textarea></label>
         <label>Фото или видео<input type="file" name="media" accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.avif,.mp4" multiple></label>
@@ -28,6 +29,7 @@
     <section class="settings panel">
       <div class="section-heading"><p class="eyebrow">Подключения</p><h2>Токены и сеть</h2></div>
       <p class="section-note">Токены используются только для публикации и не заменяют логин и пароль этой панели.</p>
+      {% if error and error_target == 'settings' %}<div class="notice error inline-notice" role="alert">{{ error }}</div>{% endif %}
       <form method="post" action="/settings" autocomplete="off">
         {% for platform, name in platforms.items() %}
         <details {% if loop.first %}open{% endif %}><summary>{{ name }}</summary><div class="settings-grid">
