@@ -15,6 +15,7 @@ from api.vk_publisher import VKPostData, VKPublisher
 from utils.auth import SecretStore, extract_vk_access_token
 from utils.media import prepare_media_for_publish, validate_media
 from utils.network import resolve_network
+from web.app import _credential_view, _update_credentials
 
 
 class CoreTests(unittest.TestCase):
@@ -59,6 +60,34 @@ class CoreTests(unittest.TestCase):
 
     def test_vk_token_with_label(self) -> None:
         self.assertEqual(extract_vk_access_token("token=vk1.a.value"), "vk1.a.value")
+
+    def test_web_credential_view_does_not_expose_saved_credentials(self) -> None:
+        stored = SecretStore(Path("missing-secrets.json")).load()
+        stored["vk"]["access_token"] = "private-vk-token"
+        stored["vk"]["group_id"] = "123"
+
+        view = _credential_view(stored)
+
+        token = next(field for field in view["vk"] if field["key"] == "access_token")
+        group = next(field for field in view["vk"] if field["key"] == "group_id")
+        self.assertTrue(token["saved"])
+        self.assertEqual(token["value"], "")
+        self.assertTrue(group["saved"])
+        self.assertEqual(group["value"], "")
+
+    def test_web_settings_save_entered_personal_token(self) -> None:
+        stored = SecretStore(Path("missing-secrets.json")).load()
+
+        _update_credentials(
+            stored,
+            {
+                "vk_access_token": (
+                    "https://oauth.vk.com/blank.html#access_token=personal-token&expires_in=0"
+                )
+            },
+        )
+
+        self.assertEqual(stored["vk"]["access_token"], "personal-token")
 
     def test_direct_network_ignores_environment(self) -> None:
         network = resolve_network("direct")

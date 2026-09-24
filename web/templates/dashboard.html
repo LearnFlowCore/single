@@ -16,26 +16,31 @@
     {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
     <section class="composer panel">
       <div class="section-heading"><p class="eyebrow">Новая публикация</p><h1>Создать пост</h1></div>
-      <form method="post" action="/publish" enctype="multipart/form-data">
+      <form id="publish-form" method="post" action="/publish" enctype="multipart/form-data">
         <label>Текст<textarea name="text" rows="8" placeholder="О чём расскажем сегодня?"></textarea></label>
         <label>Фото или видео<input type="file" name="media" accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.avif,.mp4" multiple></label>
         <fieldset><legend>Платформы</legend><div class="checks">
           {% for key, name in platforms.items() %}<label><input type="checkbox" name="platforms" value="{{ key }}"><span>{{ name }}</span></label>{% endfor %}
         </div></fieldset>
-        <button class="button primary" type="submit">Опубликовать</button>
+        <button id="publish-button" class="button primary" type="submit">Опубликовать</button>
       </form>
     </section>
     <section class="settings panel">
-      <div class="section-heading"><p class="eyebrow">Подключения</p><h2>Аккаунты и сеть</h2></div>
-      <form method="post" action="/settings">
+      <div class="section-heading"><p class="eyebrow">Подключения</p><h2>Токены и сеть</h2></div>
+      <p class="section-note">Токены используются только для публикации и не заменяют логин и пароль этой панели.</p>
+      <form method="post" action="/settings" autocomplete="off">
         {% for platform, name in platforms.items() %}
         <details {% if loop.first %}open{% endif %}><summary>{{ name }}</summary><div class="settings-grid">
-          {% for key, value in secrets[platform].items() %}
-          <label>{{ key }}<input name="{{ platform }}_{{ key }}" type="{{ 'password' if 'token' in key or 'secret' in key else 'text' }}" value="{{ '' if 'token' in key or 'secret' in key else value }}" placeholder="{{ 'Сохранён, оставьте пустым без изменений' if value and ('token' in key or 'secret' in key) else '' }}"></label>
+          {% for field in credentials[platform] %}
+          <label>{{ field.label }}
+            <input class="{{ 'masked-value' if field.secret else '' }}" name="{{ platform }}_{{ field.key }}" type="text" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore placeholder="{{ 'Значение сохранено. Оставьте пустым без изменений' if field.saved else '' }}">
+            <small>{{ field.hint }}</small>
+          </label>
           {% endfor %}
         </div></details>
         {% endfor %}
         <details><summary>Сеть и сайт</summary><div class="settings-grid">
+          <p class="render-address">Текущий адрес Render: <a href="{{ render_url }}" target="_blank" rel="noopener noreferrer">{{ render_url }}</a></p>
           <label>Режим сети<select name="network_mode"><option value="system" {{ 'selected' if settings.network_mode == 'system' }}>Системный</option><option value="direct" {{ 'selected' if settings.network_mode == 'direct' }}>Прямой</option><option value="proxy" {{ 'selected' if settings.network_mode == 'proxy' }}>Прокси</option></select></label>
           <label>Прокси<input name="proxy_url" value="{{ settings.proxy_url }}"></label>
           <label>Публичный URL медиа<input name="public_media_base_url" value="{{ settings.public_media_base_url }}"></label>
@@ -51,7 +56,29 @@
       </tbody></table></div>
     </section>
   </main>
+  <div id="publish-modal" class="publish-modal" role="dialog" aria-modal="true" aria-labelledby="publish-title" aria-hidden="true">
+    <div class="publish-progress">
+      <div class="spinner" aria-hidden="true"></div>
+      <p class="eyebrow">Публикация</p>
+      <h2 id="publish-title">Отправляем пост</h2>
+      <p>Не закрывайте страницу. Фото и видео могут загружаться несколько минут.</p>
+      <div class="progress-track"><span></span></div>
+      <p id="publish-platforms" class="publish-platforms"></p>
+    </div>
+  </div>
   <script>
+    const publishForm = document.getElementById('publish-form');
+    publishForm.addEventListener('submit', () => {
+      const selected = [...publishForm.querySelectorAll('input[name="platforms"]:checked')]
+        .map((input) => input.nextElementSibling.textContent.trim());
+      if (!selected.length) return;
+      document.getElementById('publish-platforms').textContent = selected.join(' · ');
+      document.getElementById('publish-button').disabled = true;
+      const modal = document.getElementById('publish-modal');
+      modal.classList.add('visible');
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('publishing');
+    });
     document.querySelectorAll('.delete-form').forEach((form) => {
       form.addEventListener('submit', (event) => {
         event.preventDefault();

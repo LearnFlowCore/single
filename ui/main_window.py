@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QProgressBar,
+    QProgressDialog,
     QPushButton,
     QStackedWidget,
     QTableWidget,
@@ -290,6 +291,7 @@ class MainWindow(QMainWindow):
         self._threads: set[QThread] = set()
         self._active_publish: PublishThread | None = None
         self._active_post_id: int | None = None
+        self._publish_dialog: QProgressDialog | None = None
         self._bulk_posts: list[dict[str, Any]] = []
         self._row_animations: set[QVariantAnimation] = set()
 
@@ -475,10 +477,13 @@ class MainWindow(QMainWindow):
             "instagram": [
                 ("app_id", "Facebook App ID"),
                 ("app_secret", "Facebook App Secret"),
-                ("access_token", "Long-lived access token"),
+                ("access_token", "Долгосрочный токен Instagram"),
                 ("account_id", "Instagram Business Account ID"),
             ],
-            "telegram": [("bot_token", "Bot token"), ("chat_id", "Channel chat_id")],
+            "telegram": [
+                ("bot_token", "Токен Telegram-бота"),
+                ("chat_id", "Канал или chat_id"),
+            ],
             "max": [("bot_token", "Токен бота MAX"), ("chat_id", "chat_id канала или чата")],
         }
         for platform, field_defs in definitions.items():
@@ -601,11 +606,23 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(True)
         self.result_label.clear()
         self.publish_button.setEnabled(False)
+        self._publish_dialog = QProgressDialog("Подготовка публикации...", "", 0, len(platforms), self)
+        self._publish_dialog.setWindowTitle("Публикация поста")
+        self._publish_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self._publish_dialog.setCancelButton(None)
+        self._publish_dialog.setAutoClose(False)
+        self._publish_dialog.setMinimumDuration(0)
+        self._publish_dialog.show()
         self._active_publish.start()
 
     def _platform_done(self, platform: str, success: bool, message: str) -> None:
         self.progress.setValue(self.progress.value() + 1)
         marker = "Успешно" if success else "Ошибка"
+        if self._publish_dialog is not None:
+            self._publish_dialog.setValue(self.progress.value())
+            self._publish_dialog.setLabelText(
+                f"{PLATFORM_NAMES.get(platform, platform)}: {marker.lower()}"
+            )
         self.result_label.setText(
             self.result_label.text() + f"{PLATFORM_NAMES.get(platform, platform)}: {marker} - {message}\n"
         )
@@ -615,6 +632,9 @@ class MainWindow(QMainWindow):
         if self._active_post_id is not None:
             self.repository.update_result(self._active_post_id, status, results)
         self.publish_button.setEnabled(True)
+        if self._publish_dialog is not None:
+            self._publish_dialog.close()
+            self._publish_dialog = None
         self._active_post_id = None
         self._active_publish = None
         self.refresh_history()

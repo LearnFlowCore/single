@@ -6,9 +6,10 @@ import hashlib
 import hmac
 import os
 import secrets as random_secrets
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -18,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 from config.settings import APP_DIR, Settings
 from models.post import PostRepository
 from services.publishing import publish_post
-from utils.auth import SecretStore
+from utils.auth import SecretStore, extract_vk_access_token
 from utils.logging_config import configure_logging
 from utils.media import SUPPORTED_EXTENSIONS
 from utils.network import resolve_network
@@ -27,6 +28,27 @@ ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
 UPLOAD_DIR = APP_DIR / "web_uploads"
 PLATFORMS = {"vk": "ВКонтакте", "instagram": "Instagram", "telegram": "Telegram", "max": "MAX"}
+CREDENTIAL_FIELDS = {
+    "vk": [
+        ("client_id", "ID приложения VK", "ID standalone-приложения, если получаете токен через OAuth."),
+        ("access_token", "Личный токен VK", "Вставьте access token или полный URL после авторизации VK."),
+        ("group_id", "ID группы", "Числовой ID без минуса; оставьте пустым для своей страницы."),
+    ],
+    "instagram": [
+        ("app_id", "Meta App ID", "ID приложения Meta."),
+        ("app_secret", "Meta App Secret", "Секрет приложения Meta."),
+        ("access_token", "Долгосрочный токен Instagram", "Access token профессионального аккаунта Instagram."),
+        ("account_id", "Instagram Account ID", "ID профессионального аккаунта Instagram."),
+    ],
+    "telegram": [
+        ("bot_token", "Токен Telegram-бота", "Токен от BotFather. Telegram не разрешает публикацию через личный токен."),
+        ("chat_id", "Канал или чат", "Например, @channel или числовой chat_id. Бот должен быть администратором."),
+    ],
+    "max": [
+        ("bot_token", "Токен бота MAX", "Токен бота из платформы MAX для партнёров."),
+        ("chat_id", "Канал или чат MAX", "ID канала или чата, куда добавлен бот."),
+    ],
+}
 MAX_UPLOAD_BYTES = 250 * 1024 * 1024
 TEMPORARY_PASSWORD_SHA256 = "2aae8a7eb08409459c32c4a9a74a6059ffa3023e3df041f111dce59b72bcd065"
 
@@ -184,11 +206,10 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
         return _login_redirect()
     form = await request.form()
     stored = secret_store.load()
-    for platform, fields in stored.items():
-        for key in fields:
-            value = str(form.get(f"{platform}_{key}", "")).strip()
-            if value or "token" not in key and "secret" not in key:
-                fields[key] = value
+    try:
+        _update_credentials(stored, form)
+    except ValueError as exc:
+        return _dashboard_response(request, error=str(exc))
     settings = Settings.load()
     settings.network_mode = str(form.get("network_mode", "system"))
     settings.proxy_url = str(form.get("proxy_url", "")).strip()
@@ -198,8 +219,14 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
         resolve_network(settings.network_mode, settings.proxy_url)
     except ValueError as exc:
         return _dashboard_response(request, error=str(exc))
-    secret_store.save(stored)
-    settings.save()
+    try:
+        secret_store.save(stored)
+        settings.save()
+    except OSError as exc:
+        return _dashboard_response(
+            request,
+            error=f"Не удалось сохранить настройки на сервере: {exc}",
+        )
     return _dashboard_response(request, message="Настройки сохранены.")
 
 
@@ -226,7 +253,7 @@ async def download():  # type: ignore[no-untyped-def]
 def _dashboard_response(request: Request, *, message: str = "", error: str = ""):
     records = repository.recent(50)
     settings = Settings.load()
-    stored = secret_store.load()
+    credentials = _credential_view(secret_store.load())
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -236,7 +263,40 @@ def _dashboard_response(request: Request, *, message: str = "", error: str = "")
             "platforms": PLATFORMS,
             "records": records,
             "settings": settings,
-            "secrets": stored,
+            "credentials": credentials,
+            "render_url": str(request.base_url).rstrip("/"),
             "now": datetime.now(),
         },
     )
+
+
+def _credential_view(stored: Mapping[str, Mapping[str, str]]) -> dict[str, list[dict[str, Any]]]:
+    result: dict[str, list[dict[str, Any]]] = {}
+    for platform, definitions in CREDENTIAL_FIELDS.items():
+        result[platform] = []
+        for key, label, hint in definitions:
+            value = stored.get(platform, {}).get(key, "")
+            secret = "token" in key or "secret" in key
+            result[platform].append(
+                {
+                    "key": key,
+                    "label": label,
+                    "hint": hint,
+                    "secret": secret,
+                    "saved": bool(value),
+                    "value": "",
+                }
+            )
+    return result
+
+
+def _update_credentials(
+    stored: dict[str, dict[str, str]], form: Mapping[str, Any]
+) -> None:
+    for platform, fields in stored.items():
+        for key in fields:
+            value = str(form.get(f"{platform}_{key}", "")).strip()
+            if platform == "vk" and key == "access_token" and value:
+                value = extract_vk_access_token(value)
+            if value:
+                fields[key] = value
