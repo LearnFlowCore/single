@@ -186,13 +186,16 @@ async def publish(
             text=text.strip(), media_paths=paths, platforms=selected, status="publishing"
         )
         results = await publish_post(text.strip(), paths, selected, secret_store.load(), Settings.load())
-        status = "success" if all(item.get("success") for item in results.values()) else "error"
+        all_success = bool(results) and all(item.get("success") for item in results.values())
+        status = "success" if all_success else "error"
         repository.update_result(post_id, status, results)
         details = "; ".join(
             f"{PLATFORMS[name]}: {'успешно' if value.get('success') else value.get('error')}"
             for name, value in results.items()
         )
-        return _dashboard_response(request, message=details)
+        if all_success:
+            return _dashboard_response(request, message=details)
+        return _dashboard_response(request, error=details)
     except Exception as exc:
         return _dashboard_response(request, error=str(exc))
     finally:
