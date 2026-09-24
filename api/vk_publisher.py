@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import mimetypes
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -16,6 +17,7 @@ VK_API_VERSION = "5.131"
 VK_PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif"}
 VK_SCOPE_PHOTOS = 4
 VK_SCOPE_WALL = 8192
+VK_UPLOAD_ATTEMPTS = 3
 
 
 @dataclass(slots=True)
@@ -122,34 +124,61 @@ class VKPublisher(SocialPlatform):
         upload_params: dict[str, Any] = {}
         if self.group_id is not None:
             upload_params["group_id"] = self.group_id
-        upload_server = await self._vk_call(
-            "photos.getWallUploadServer", upload_params, "VK photo upload setup"
-        )
-        server_data = upload_server.get("response")
-        if not isinstance(server_data, dict) or not server_data.get("upload_url"):
-            raise PublishError("VK did not return a photo upload URL")
-
-        with path.open("rb") as source:
-            upload_response = await self._request(
-                "POST",
-                str(server_data["upload_url"]),
-                operation="VK photo upload",
-                files={"photo": (path.name, source)},
+        mime_type = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+        for attempt in range(1, VK_UPLOAD_ATTEMPTS + 1):
+            upload_server = await self._vk_call(
+                "photos.getWallUploadServer", upload_params, "VK photo upload setup"
             )
-        uploaded = require_success(upload_response, "VK photo upload")
-        save_params: dict[str, Any] = {
-            "server": uploaded.get("server"),
-            "photo": uploaded.get("photo"),
-            "hash": uploaded.get("hash"),
-        }
-        if self.group_id is not None:
-            save_params["group_id"] = self.group_id
-        saved_payload = await self._vk_call("photos.saveWallPhoto", save_params, "VK photo save")
-        saved = saved_payload.get("response")
-        if not isinstance(saved, list) or not saved:
-            raise PublishError("VK did not return the saved photo")
-        photo = saved[0]
-        return f"photo{photo['owner_id']}_{photo['id']}"
+            server_data = upload_server.get("response")
+            if not isinstance(server_data, dict) or not server_data.get("upload_url"):
+                raise PublishError("VK did not return a photo upload URL")
+
+            with path.open("rb") as source:
+                upload_response = await self._request(
+                    "POST",
+                    str(server_data["upload_url"]),
+                    operation="VK photo upload",
+                    files={"photo": (path.name, source, mime_type)},
+                )
+            uploaded = require_success(upload_response, "VK photo upload")
+            if not _is_complete_upload(uploaded):
+                self._logger.warning(
+                    "VK upload server did not accept photo; requesting a new server (%d/%d)",
+                    attempt,
+                    VK_UPLOAD_ATTEMPTS,
+                )
+                continue
+
+            save_params: dict[str, Any] = {
+                "server": uploaded["server"],
+                "photo": uploaded["photo"],
+                "hash": uploaded["hash"],
+            }
+            if self.group_id is not None:
+                save_params["group_id"] = self.group_id
+            try:
+                saved_payload = await self._vk_call(
+                    "photos.saveWallPhoto", save_params, "VK photo save"
+                )
+            except PublishError as exc:
+                if attempt < VK_UPLOAD_ATTEMPTS and "photo is undefined" in str(exc).lower():
+                    self._logger.warning(
+                        "VK rejected uploaded photo; retrying with a new server (%d/%d)",
+                        attempt,
+                        VK_UPLOAD_ATTEMPTS,
+                    )
+                    continue
+                raise
+            saved = saved_payload.get("response")
+            if not isinstance(saved, list) or not saved:
+                raise PublishError("VK did not return the saved photo")
+            photo = saved[0]
+            return f"photo{photo['owner_id']}_{photo['id']}"
+
+        raise PublishError(
+            "VK не принял изображение после трёх попыток. "
+            "Попробуйте выбрать файл заново или сохранить его как JPG."
+        )
 
     async def _vk_call(
         self, method: str, params: dict[str, Any], operation: str
@@ -173,6 +202,17 @@ class VKPublisher(SocialPlatform):
                 raise AuthenticationError("Доступ к группе VK запрещён. Проверьте ID и права администратора.")
             raise PublishError(f"{operation}: {message}")
         return payload
+
+
+def _is_complete_upload(payload: dict[str, Any]) -> bool:
+    photo = payload.get("photo")
+    return (
+        payload.get("server") is not None
+        and isinstance(photo, str)
+        and bool(photo.strip())
+        and photo.strip() != "[]"
+        and bool(payload.get("hash"))
+    )
 
 
 __all__ = ["VKPostData", "VKPublisher"]

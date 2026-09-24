@@ -3,16 +3,37 @@
 from __future__ import annotations
 
 import mimetypes
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Iterator
 from urllib.parse import unquote, urlsplit
 
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".mp4"}
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif"}
+from PIL import Image, ImageOps, UnidentifiedImageError
+from pillow_heif import register_heif_opener
+
+register_heif_opener()
+
+SUPPORTED_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    ".heic",
+    ".heif",
+    ".avif",
+    ".mp4",
+}
+IMAGE_EXTENSIONS = SUPPORTED_EXTENSIONS - {".mp4"}
 VIDEO_EXTENSIONS = {".mp4"}
-DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+DEFAULT_MAX_IMAGE_BYTES = 100 * 1024 * 1024
 DEFAULT_MAX_VIDEO_BYTES = 200 * 1024 * 1024
+MAX_PUBLISH_IMAGE_EDGE = 1440
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,3 +102,78 @@ def validate_media(
         )
         result.append(MediaInfo(item, extension, mime_type, kind, local_path, size))
     return result
+
+
+@contextmanager
+def prepare_media_for_publish(
+    media: Iterable[str | Path], *, for_instagram: bool = False
+) -> Iterator[list[str]]:
+    """Convert local images to API-safe files while preserving videos and remote URLs."""
+
+    source_items = validate_media(media, allow_remote=True)
+    with tempfile.TemporaryDirectory(prefix="other-world-media-") as directory:
+        prepared: list[str] = []
+        for index, item in enumerate(source_items):
+            if item.path is None or item.kind == "video":
+                prepared.append(str(item.source))
+                continue
+            if item.extension == ".gif" and not for_instagram:
+                _verify_image(item.path)
+                prepared.append(str(item.path))
+                continue
+            target = Path(directory) / f"image-{index + 1}.jpg"
+            _convert_image(item.path, target, fit_instagram=for_instagram)
+            prepared.append(str(target))
+        yield prepared
+
+
+def _verify_image(path: Path) -> None:
+    try:
+        with Image.open(path) as image:
+            image.verify()
+    except (OSError, UnidentifiedImageError) as exc:
+        raise ValueError(f"Файл не является корректным изображением: {path.name}") from exc
+
+
+def _convert_image(source: Path, target: Path, *, fit_instagram: bool) -> None:
+    try:
+        with Image.open(source) as opened:
+            image = ImageOps.exif_transpose(opened)
+            image.seek(0)
+            image.load()
+            image = _flatten_to_rgb(image)
+            image.thumbnail(
+                (MAX_PUBLISH_IMAGE_EDGE, MAX_PUBLISH_IMAGE_EDGE),
+                Image.Resampling.LANCZOS,
+            )
+            if fit_instagram:
+                image = _pad_instagram_ratio(image)
+            image.save(target, "JPEG", quality=90, optimize=True, progressive=True)
+    except (OSError, UnidentifiedImageError, ValueError) as exc:
+        raise ValueError(f"Не удалось подготовить изображение {source.name}: {exc}") from exc
+
+
+def _flatten_to_rgb(image: Image.Image) -> Image.Image:
+    if image.mode == "RGB":
+        return image.copy()
+    if image.mode in {"RGBA", "LA"} or "transparency" in image.info:
+        rgba = image.convert("RGBA")
+        background = Image.new("RGBA", rgba.size, "white")
+        return Image.alpha_composite(background, rgba).convert("RGB")
+    return image.convert("RGB")
+
+
+def _pad_instagram_ratio(image: Image.Image) -> Image.Image:
+    width, height = image.size
+    if width <= 0 or height <= 0:
+        raise ValueError("изображение имеет нулевой размер")
+    ratio = width / height
+    if 0.8 <= ratio <= 1.91:
+        return image
+    if ratio < 0.8:
+        canvas_size = (round(height * 0.8), height)
+    else:
+        canvas_size = (width, round(width / 1.91))
+    canvas = Image.new("RGB", canvas_size, "white")
+    canvas.paste(image, ((canvas.width - width) // 2, (canvas.height - height) // 2))
+    return canvas

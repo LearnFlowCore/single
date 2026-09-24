@@ -1,8 +1,10 @@
-# AutoPoster
+# Окно в другой мир
 
 Desktop- и веб-приложение для публикации в VK, Instagram, Telegram и MAX.
 
-[Скачать AutoPoster для Windows](https://github.com/code-spark-pro/single/releases/latest/download/AutoPoster.exe)
+Изображения JPG, PNG, GIF, WebP, HEIC, HEIF, AVIF, BMP и TIFF автоматически приводятся к совместимому с API формату, включая поворот EXIF, цветовой режим и ограничения Instagram.
+
+[Скачать приложение для Windows](https://github.com/code-spark-pro/single/releases/latest/download/Okno-v-drugoi-mir-safe.zip)
 
 ## Запуск
 
@@ -28,14 +30,15 @@ python -m venv .venv
 
 ## Сайт и веб-панель
 
-Задайте пароль администратора и запустите сервер:
+Задайте логин и пароль администратора, затем запустите сервер:
 
 ```powershell
+$env:AUTOPOSTER_WEB_USERNAME = "Admin"
 $env:AUTOPOSTER_WEB_PASSWORD = "сложный-пароль"
 python web_main.py
 ```
 
-Локальный адрес: `http://127.0.0.1:8000`. Главная страница доступна публично и содержит кнопку загрузки `dist\AutoPoster.exe`; веб-панель защищена паролем. Для постоянной публичной ссылки разверните `Dockerfile` на VPS или облачном сервисе, подключите HTTPS-домен и задайте переменные `AUTOPOSTER_WEB_PASSWORD`, `AUTOPOSTER_WEB_SECRET` и `AUTOPOSTER_COOKIE_SECURE=1`. Каталог `/data` необходимо подключить как постоянный volume.
+Локальный адрес: `http://127.0.0.1:8000`. Главная страница доступна публично и содержит кнопку загрузки `dist\Okno-v-drugoi-mir-safe.zip`; веб-панель защищена логином и паролем. Для постоянной публичной ссылки разверните `Dockerfile` на VPS или облачном сервисе, подключите HTTPS-домен и задайте переменные `AUTOPOSTER_WEB_USERNAME`, `AUTOPOSTER_WEB_PASSWORD`, `AUTOPOSTER_WEB_SECRET` и `AUTOPOSTER_COOKIE_SECURE=1`. Каталог `/data` необходимо подключить как постоянный volume.
 
 После развёртывания укажите полученный HTTPS-адрес в поле «Публичный адрес сайта». Кнопка «Открыть сайт» в верхней панели desktop-приложения будет открывать этот адрес.
 
@@ -56,4 +59,4 @@ text,media_paths,platforms,scheduled_at
 pyinstaller --clean autoposter.spec
 ```
 
-Готовый файл появится в `dist\AutoPoster.exe`. Приложение не требует административных прав.
+Готовая папка появится в `dist\Okno-v-drugoi-mir`. Сборка не использует UPX и однофайловую самораспаковку. Для распространения упакуйте папку целиком: после распаковки запускается `Okno-v-drugoi-mir.exe`, а каталог `_internal` должен оставаться рядом. В заголовке окна отображается название «Окно в другой мир». Приложение не требует административных прав.

@@ -10,6 +10,7 @@ from api.max_publisher import MaxPostData, MaxPublisher
 from api.telegram_publisher import TelegramPostData, TelegramPublisher
 from api.vk_publisher import VKPostData, VKPublisher
 from config.settings import Settings
+from utils.media import prepare_media_for_publish
 from utils.network import resolve_network
 
 
@@ -20,9 +21,12 @@ async def publish_post(
     secrets: dict[str, dict[str, str]],
     settings: Settings,
 ) -> dict[str, dict[str, Any]]:
-    pairs = await asyncio.gather(
-        *(_publish_one(name, text, media_paths, secrets, settings) for name in platforms)
-    )
+    with prepare_media_for_publish(
+        media_paths, for_instagram="instagram" in platforms
+    ) as prepared_media:
+        pairs = await asyncio.gather(
+            *(_publish_one(name, text, prepared_media, secrets, settings) for name in platforms)
+        )
     return dict(pairs)
 
 

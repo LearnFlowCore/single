@@ -1,4 +1,4 @@
-"""Start the AutoPoster browser interface."""
+"""Start the Окно в другой мир browser interface."""
 
 from __future__ import annotations
 

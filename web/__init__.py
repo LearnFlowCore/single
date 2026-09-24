@@ -1,1 +1,1 @@
-"""Browser interface for AutoPoster."""
+"""Browser interface for Окно в другой мир."""

@@ -1,1 +1,1 @@
-"""AutoPoster desktop application."""
+"""Окно в другой мир desktop application."""

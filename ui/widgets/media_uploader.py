@@ -29,7 +29,10 @@ class MediaUploader(QWidget):
         self.setObjectName("mediaUploader")
         self.setMinimumHeight(170)
 
-        self.hint = QLabel("Перетащите JPG, PNG, GIF или MP4 сюда\nили выберите файлы")
+        self.hint = QLabel(
+            "Перетащите изображение или MP4 сюда\n"
+            "Поддерживаются JPG, PNG, GIF, WebP, HEIC, AVIF, BMP и TIFF"
+        )
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         choose = QPushButton("Выбрать файлы")
         choose.clicked.connect(self._choose_files)
@@ -58,7 +61,10 @@ class MediaUploader(QWidget):
 
     def _choose_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Выберите медиа", "", "Медиа (*.jpg *.jpeg *.png *.gif *.mp4)"
+            self,
+            "Выберите медиа",
+            "",
+            "Медиа (*.jpg *.jpeg *.png *.gif *.webp *.bmp *.tif *.tiff *.heic *.heif *.avif *.mp4)",
         )
         self._add_paths(paths)
 

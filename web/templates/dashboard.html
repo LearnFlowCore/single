@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Панель · AutoPoster</title>
+  <title>Панель · Окно в другой мир</title>
   <link rel="stylesheet" href="/static/site.css">
 </head>
 <body class="admin-page">
   <header class="admin-header">
-    <a class="brand" href="/"><span>AP</span> AutoPoster</a>
+    <a class="brand" href="/"><span>ОМ</span> Окно в другой мир</a>
     <form action="/logout" method="post"><button class="text-button">Выйти</button></form>
   </header>
   <main class="admin-shell">
@@ -18,7 +18,7 @@
       <div class="section-heading"><p class="eyebrow">Новая публикация</p><h1>Создать пост</h1></div>
       <form method="post" action="/publish" enctype="multipart/form-data">
         <label>Текст<textarea name="text" rows="8" placeholder="О чём расскажем сегодня?"></textarea></label>
-        <label>Фото или видео<input type="file" name="media" accept=".jpg,.jpeg,.png,.gif,.mp4" multiple></label>
+        <label>Фото или видео<input type="file" name="media" accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.avif,.mp4" multiple></label>
         <fieldset><legend>Платформы</legend><div class="checks">
           {% for key, name in platforms.items() %}<label><input type="checkbox" name="platforms" value="{{ key }}"><span>{{ name }}</span></label>{% endfor %}
         </div></fieldset>

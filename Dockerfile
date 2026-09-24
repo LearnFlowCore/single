@@ -7,8 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     AUTOPOSTER_WEB_PORT=8000
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements-web.txt .
+RUN pip install --no-cache-dir -r requirements-web.txt
 COPY . .
 RUN mkdir -p /data
 

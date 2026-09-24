@@ -1,1 +1,1 @@
-"""AutoPoster tests."""
+"""Окно в другой мир tests."""

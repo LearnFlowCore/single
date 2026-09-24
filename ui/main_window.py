@@ -49,6 +49,7 @@ from ui.widgets.platform_selector import PlatformSelector
 from ui.widgets.publish_button import PublishButton
 from ui.widgets.text_editor import TextEditor
 from utils.auth import SecretStore, extract_vk_access_token, vk_oauth_url
+from utils.media import prepare_media_for_publish
 from utils.network import resolve_network
 
 import httpx
@@ -90,14 +91,19 @@ class PublishThread(QThread):
         self.all_done.emit(results)
 
     async def _publish_all(self) -> dict[str, dict[str, Any]]:
-        jobs = [self._publish_one(platform) for platform in self.platforms]
-        pairs = await asyncio.gather(*jobs)
+        with prepare_media_for_publish(
+            self.media_paths, for_instagram="instagram" in self.platforms
+        ) as prepared_media:
+            jobs = [self._publish_one(platform, prepared_media) for platform in self.platforms]
+            pairs = await asyncio.gather(*jobs)
         return dict(pairs)
 
-    async def _publish_one(self, platform: str) -> tuple[str, dict[str, Any]]:
+    async def _publish_one(
+        self, platform: str, media_paths: list[str]
+    ) -> tuple[str, dict[str, Any]]:
         publisher = None
         try:
-            publisher, post = self._build(platform)
+            publisher, post = self._build(platform, media_paths)
             response = await publisher.publish(post)
             url = self._result_url(platform, response)
             result: dict[str, Any] = {"success": True, "url": url, "error": ""}
@@ -111,7 +117,7 @@ class PublishThread(QThread):
                 await publisher.aclose()
         return platform, result
 
-    def _build(self, platform: str):  # type: ignore[no-untyped-def]
+    def _build(self, platform: str, media_paths: list[str]):  # type: ignore[no-untyped-def]
         network = resolve_network(self.settings.network_mode, self.settings.proxy_url)
         if platform == "vk":
             values = self.secrets["vk"]
@@ -122,7 +128,7 @@ class PublishThread(QThread):
                 proxy=network.proxy,
                 trust_env=network.trust_env,
             ), VKPostData(
-                text=self.text, media=self.media_paths
+                text=self.text, media=media_paths
             )
         if platform == "instagram":
             values = self.secrets["instagram"]
@@ -134,7 +140,7 @@ class PublishThread(QThread):
                 media_port=self.settings.media_port,
                 proxy=network.proxy,
                 trust_env=network.trust_env,
-            ), InstagramPostData(text=self.text, media=self.media_paths)
+            ), InstagramPostData(text=self.text, media=media_paths)
         if platform == "telegram":
             values = self.secrets["telegram"]
             return TelegramPublisher(
@@ -143,7 +149,7 @@ class PublishThread(QThread):
                 proxy=network.proxy,
                 trust_env=network.trust_env,
             ), TelegramPostData(
-                text=self.text, media=self.media_paths
+                text=self.text, media=media_paths
             )
         if platform == "max":
             values = self.secrets["max"]
@@ -152,7 +158,7 @@ class PublishThread(QThread):
                 values["chat_id"],
                 proxy=network.proxy,
                 trust_env=network.trust_env,
-            ), MaxPostData(text=self.text, media=self.media_paths)
+            ), MaxPostData(text=self.text, media=media_paths)
         raise ValueError(f"Неизвестная платформа: {platform}")
 
     @staticmethod
@@ -287,7 +293,7 @@ class MainWindow(QMainWindow):
         self._bulk_posts: list[dict[str, Any]] = []
         self._row_animations: set[QVariantAnimation] = set()
 
-        self.setWindowTitle("AutoPoster")
+        self.setWindowTitle("Окно в другой мир")
         self.resize(1200, 800)
         self.setMinimumSize(900, 600)
         self._build_ui()
@@ -308,7 +314,7 @@ class MainWindow(QMainWindow):
         header = QFrame()
         header.setObjectName("topBar")
         header_layout = QHBoxLayout(header)
-        logo = QLabel("AutoPoster")
+        logo = QLabel("Окно в другой мир")
         logo.setObjectName("logo")
         settings_button = QPushButton("Настройки")
         settings_button.setObjectName("topButton")
@@ -664,7 +670,7 @@ class MainWindow(QMainWindow):
         if not url:
             QMessageBox.information(
                 self,
-                "Сайт AutoPoster",
+                "Сайт «Окно в другой мир»",
                 "Укажите публичный адрес сайта в разделе настроек аккаунтов.",
             )
             self._show_page(2)

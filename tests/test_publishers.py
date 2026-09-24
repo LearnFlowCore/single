@@ -6,13 +6,14 @@ import unittest
 from pathlib import Path
 
 import httpx
+from PIL import Image
 
 from api.instagram_publisher import InstagramPublisher
 from api.max_publisher import MaxPostData, MaxPublisher
 from api.telegram_publisher import TelegramPostData, TelegramPublisher
 from api.vk_publisher import VKPostData, VKPublisher
 from utils.auth import SecretStore, extract_vk_access_token
-from utils.media import validate_media
+from utils.media import prepare_media_for_publish, validate_media
 from utils.network import resolve_network
 
 
@@ -23,6 +24,25 @@ class CoreTests(unittest.TestCase):
             image.write_bytes(b"image")
             info = validate_media([image])
             self.assertEqual(info[0].kind, "image")
+
+    def test_webp_is_normalized_to_rgb_jpeg(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "transparent.webp"
+            Image.new("RGBA", (2000, 1000), (255, 0, 0, 128)).save(source, "WEBP")
+            with prepare_media_for_publish([source]) as prepared:
+                result = Path(prepared[0])
+                self.assertEqual(result.suffix, ".jpg")
+                with Image.open(result) as image:
+                    self.assertEqual(image.mode, "RGB")
+                    self.assertLessEqual(max(image.size), 1440)
+
+    def test_instagram_image_ratio_is_padded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "portrait.png"
+            Image.new("RGB", (400, 1200), "blue").save(source)
+            with prepare_media_for_publish([source], for_instagram=True) as prepared:
+                with Image.open(prepared[0]) as image:
+                    self.assertGreaterEqual(image.width / image.height, 0.8)
 
     def test_secret_store_utf8_roundtrip(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -90,6 +110,33 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await publisher.aclose()
 
+    async def test_telegram_image_and_text_request(self) -> None:
+        captured: dict[str, bytes | str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["content_type"] = request.headers.get("content-type", "")
+            captured["body"] = request.content
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 2}})
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "photo.webp"
+            Image.new("RGB", (640, 480), "yellow").save(source, "WEBP")
+            with prepare_media_for_publish([source]) as prepared:
+                publisher = TelegramPublisher("token", "@channel")
+                await publisher._client.aclose()
+                publisher._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+                try:
+                    result = await publisher.publish(
+                        TelegramPostData(text="Текст с картинкой", media=prepared)
+                    )
+                    self.assertIn("message_id", json.dumps(result))
+                    self.assertIn("multipart/form-data", str(captured["content_type"]))
+                    body = bytes(captured["body"])
+                    self.assertIn(b'image/jpeg', body)
+                    self.assertIn("Текст с картинкой".encode(), body)
+                finally:
+                    await publisher.aclose()
+
     async def test_vk_text_request(self) -> None:
         calls: list[str] = []
 
@@ -113,6 +160,46 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
             )
         finally:
             await publisher.aclose()
+
+    async def test_vk_retries_when_upload_server_does_not_accept_photo(self) -> None:
+        calls: list[str] = []
+        upload_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal upload_count
+            calls.append(request.url.path)
+            if request.url.path.endswith("users.get"):
+                return httpx.Response(200, json={"response": [{"id": 42}]})
+            if request.url.path.endswith("account.getAppPermissions"):
+                return httpx.Response(200, json={"response": 8196})
+            if request.url.path.endswith("photos.getWallUploadServer"):
+                return httpx.Response(200, json={"response": {"upload_url": "https://upload.vk.test/photo"}})
+            if request.url.host == "upload.vk.test":
+                upload_count += 1
+                photo = "[]" if upload_count == 1 else '[{"sizes": []}]'
+                return httpx.Response(
+                    200, json={"server": 1, "photo": photo, "hash": "upload-hash"}
+                )
+            if request.url.path.endswith("photos.saveWallPhoto"):
+                return httpx.Response(
+                    200, json={"response": [{"owner_id": 42, "id": 99}]}
+                )
+            return httpx.Response(200, json={"response": {"post_id": 7}})
+
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "photo.jpg"
+            Image.new("RGB", (640, 480), "yellow").save(image, "JPEG")
+            publisher = VKPublisher("token")
+            await publisher._client.aclose()
+            publisher._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            try:
+                result = await publisher.publish(VKPostData(text="Тест", media=[image]))
+                self.assertEqual(result["post_id"], 7)
+                self.assertEqual(upload_count, 2)
+                self.assertEqual(calls.count("/method/photos.getWallUploadServer"), 2)
+                self.assertEqual(calls.count("/method/photos.saveWallPhoto"), 1)
+            finally:
+                await publisher.aclose()
 
     async def test_instagram_auth_request(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

@@ -1,4 +1,4 @@
-"""AutoPoster application entry point."""
+"""Окно в другой мир application entry point."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ def resource_path(relative: str) -> Path:
 def main() -> int:
     configure_logging()
     app = QApplication(sys.argv)
-    app.setApplicationName("AutoPoster")
-    app.setOrganizationName("AutoPoster")
+    app.setApplicationName("Окно в другой мир")
+    app.setOrganizationName("Окно в другой мир")
     style_path = resource_path("ui/styles/wp_style.qss")
     if style_path.exists():
         app.setStyleSheet(style_path.read_text(encoding="utf-8"))

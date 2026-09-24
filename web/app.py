@@ -30,7 +30,7 @@ PLATFORMS = {"vk": "ВКонтакте", "instagram": "Instagram", "telegram": "
 MAX_UPLOAD_BYTES = 250 * 1024 * 1024
 
 configure_logging()
-app = FastAPI(title="AutoPoster", docs_url=None, redoc_url=None)
+app = FastAPI(title="Окно в другой мир", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 templates = Jinja2Templates(directory=ROOT / "templates")
 repository = PostRepository()
@@ -41,10 +41,15 @@ def _password() -> str:
     return os.getenv("AUTOPOSTER_WEB_PASSWORD", "")
 
 
+def _username() -> str:
+    return os.getenv("AUTOPOSTER_WEB_USERNAME", "Admin")
+
+
 def _session_value() -> str:
     password = _password()
     key = os.getenv("AUTOPOSTER_WEB_SECRET", password).encode("utf-8")
-    return hmac.new(key, b"autoposter-admin", hashlib.sha256).hexdigest() if key else ""
+    message = f"autoposter-admin:{_username()}".encode("utf-8")
+    return hmac.new(key, message, hashlib.sha256).hexdigest() if key else ""
 
 
 def _authenticated(request: Request) -> bool:
@@ -58,7 +63,7 @@ def _login_redirect() -> RedirectResponse:
 
 @app.get("/", response_class=HTMLResponse)
 async def landing(request: Request):  # type: ignore[no-untyped-def]
-    exe_exists = (PROJECT_ROOT / "dist" / "AutoPoster.exe").is_file()
+    exe_exists = (PROJECT_ROOT / "dist" / "Okno-v-drugoi-mir-safe.zip").is_file()
     return templates.TemplateResponse(
         request, "landing.html", {"authenticated": _authenticated(request), "exe_exists": exe_exists}
     )
@@ -74,13 +79,19 @@ async def login_page(request: Request):  # type: ignore[no-untyped-def]
 
 
 @app.post("/login", response_class=HTMLResponse)
-async def login(request: Request, password: Annotated[str, Form()]):  # type: ignore[no-untyped-def]
-    expected = _password()
-    if not expected or not hmac.compare_digest(password, expected):
+async def login(  # type: ignore[no-untyped-def]
+    request: Request,
+    username: Annotated[str, Form()],
+    password: Annotated[str, Form()],
+):
+    expected_password = _password()
+    valid_username = hmac.compare_digest(username, _username())
+    valid_password = bool(expected_password) and hmac.compare_digest(password, expected_password)
+    if not valid_username or not valid_password:
         return templates.TemplateResponse(
             request,
             "login.html",
-            {"error": "Неверный пароль", "configured": bool(expected)},
+            {"error": "Неверный логин или пароль", "configured": bool(expected_password)},
             status_code=401,
         )
     response = RedirectResponse("/dashboard", status_code=303)
@@ -194,10 +205,14 @@ async def delete_post(request: Request, post_id: int):  # type: ignore[no-untype
 
 @app.get("/download")
 async def download():  # type: ignore[no-untyped-def]
-    path = PROJECT_ROOT / "dist" / "AutoPoster.exe"
+    path = PROJECT_ROOT / "dist" / "Okno-v-drugoi-mir-safe.zip"
     if not path.is_file():
-        return HTMLResponse("Сборка AutoPoster.exe пока не опубликована", status_code=404)
-    return FileResponse(path, filename="AutoPoster.exe", media_type="application/vnd.microsoft.portable-executable")
+        return HTMLResponse("Сборка «Окно в другой мир» пока не опубликована", status_code=404)
+    return FileResponse(
+        path,
+        filename="Okno-v-drugoi-mir-safe.zip",
+        media_type="application/zip",
+    )
 
 
 def _dashboard_response(request: Request, *, message: str = "", error: str = ""):
