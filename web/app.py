@@ -28,6 +28,7 @@ PROJECT_ROOT = ROOT.parent
 UPLOAD_DIR = APP_DIR / "web_uploads"
 PLATFORMS = {"vk": "ВКонтакте", "instagram": "Instagram", "telegram": "Telegram", "max": "MAX"}
 MAX_UPLOAD_BYTES = 250 * 1024 * 1024
+TEMPORARY_PASSWORD_SHA256 = "2aae8a7eb08409459c32c4a9a74a6059ffa3023e3df041f111dce59b72bcd065"
 
 configure_logging()
 app = FastAPI(title="Окно в другой мир", docs_url=None, redoc_url=None)
@@ -45,9 +46,17 @@ def _username() -> str:
     return os.getenv("AUTOPOSTER_WEB_USERNAME", "Admin")
 
 
+def _valid_password(value: str) -> bool:
+    password = _password()
+    if password:
+        return hmac.compare_digest(value, password)
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return hmac.compare_digest(digest, TEMPORARY_PASSWORD_SHA256)
+
+
 def _session_value() -> str:
     password = _password()
-    key = os.getenv("AUTOPOSTER_WEB_SECRET", password).encode("utf-8")
+    key = os.getenv("AUTOPOSTER_WEB_SECRET", password or TEMPORARY_PASSWORD_SHA256).encode("utf-8")
     message = f"autoposter-admin:{_username()}".encode("utf-8")
     return hmac.new(key, message, hashlib.sha256).hexdigest() if key else ""
 
@@ -74,7 +83,7 @@ async def login_page(request: Request):  # type: ignore[no-untyped-def]
     return templates.TemplateResponse(
         request,
         "login.html",
-        {"error": "", "configured": bool(_password())},
+        {"error": "", "configured": True},
     )
 
 
@@ -84,14 +93,13 @@ async def login(  # type: ignore[no-untyped-def]
     username: Annotated[str, Form()],
     password: Annotated[str, Form()],
 ):
-    expected_password = _password()
     valid_username = hmac.compare_digest(username, _username())
-    valid_password = bool(expected_password) and hmac.compare_digest(password, expected_password)
+    valid_password = _valid_password(password)
     if not valid_username or not valid_password:
         return templates.TemplateResponse(
             request,
             "login.html",
-            {"error": "Неверный логин или пароль", "configured": bool(expected_password)},
+            {"error": "Неверный логин или пароль", "configured": True},
             status_code=401,
         )
     response = RedirectResponse("/dashboard", status_code=303)
