@@ -78,7 +78,7 @@ class CoreTests(unittest.TestCase):
     def test_web_settings_save_entered_personal_token(self) -> None:
         stored = SecretStore(Path("missing-secrets.json")).load()
 
-        _update_credentials(
+        changed = _update_credentials(
             stored,
             {
                 "vk_access_token": (
@@ -88,6 +88,7 @@ class CoreTests(unittest.TestCase):
         )
 
         self.assertEqual(stored["vk"]["access_token"], "personal-token")
+        self.assertIn(("vk", "access_token"), changed)
 
     def test_direct_network_ignores_environment(self) -> None:
         network = resolve_network("direct")

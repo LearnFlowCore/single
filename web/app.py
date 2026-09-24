@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 
 from config.settings import APP_DIR, Settings
 from models.post import PostRepository
-from services.publishing import publish_post
+from services.publishing import authenticate_platform, publish_post
 from utils.auth import SecretStore, extract_vk_access_token
 from utils.logging_config import configure_logging
 from utils.media import SUPPORTED_EXTENSIONS
@@ -214,7 +214,7 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
     form = await request.form()
     stored = secret_store.load()
     try:
-        _update_credentials(stored, form)
+        changed_credentials = _update_credentials(stored, form)
     except ValueError as exc:
         return _dashboard_response(request, error=str(exc), error_target="settings")
     settings = Settings.load()
@@ -226,6 +226,15 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
         resolve_network(settings.network_mode, settings.proxy_url)
     except ValueError as exc:
         return _dashboard_response(request, error=str(exc), error_target="settings")
+    if ("vk", "access_token") in changed_credentials:
+        try:
+            await authenticate_platform("vk", stored, settings)
+        except Exception as exc:
+            return _dashboard_response(
+                request,
+                error=f"Токен VK не сохранён: {exc}",
+                error_target="settings",
+            )
     try:
         secret_store.save(stored)
         settings.save()
@@ -307,7 +316,8 @@ def _credential_view(stored: Mapping[str, Mapping[str, str]]) -> dict[str, list[
 
 def _update_credentials(
     stored: dict[str, dict[str, str]], form: Mapping[str, Any]
-) -> None:
+) -> set[tuple[str, str]]:
+    changed: set[tuple[str, str]] = set()
     for platform, fields in stored.items():
         for key in fields:
             value = str(form.get(f"{platform}_{key}", "")).strip()
@@ -315,3 +325,5 @@ def _update_credentials(
                 value = extract_vk_access_token(value)
             if value:
                 fields[key] = value
+                changed.add((platform, key))
+    return changed

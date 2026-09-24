@@ -35,10 +35,18 @@
         <details {% if loop.first %}open{% endif %}><summary>{{ name }}</summary><div class="settings-grid">
           {% for field in credentials[platform] %}
           <label>{{ field.label }}
-            <input class="{{ 'masked-value' if field.secret else '' }}" name="{{ platform }}_{{ field.key }}" type="text" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore placeholder="{{ 'Значение сохранено. Оставьте пустым без изменений' if field.saved else '' }}">
+            <input id="{{ platform }}-{{ field.key }}" class="{{ 'masked-value' if field.secret else '' }}" name="{{ platform }}_{{ field.key }}" type="text" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-1p-ignore data-lpignore="true" data-bwignore placeholder="{{ 'Значение сохранено. Оставьте пустым без изменений' if field.saved else '' }}">
             <small>{{ field.hint }}</small>
           </label>
           {% endfor %}
+          {% if platform == 'vk' %}
+          <div class="token-help">
+            <strong>Если токен недействителен или истёк</strong>
+            <p>Введите ID вашего standalone-приложения VK и нажмите кнопку ниже. Разрешите доступ, затем скопируйте весь адрес открывшейся страницы с <code>access_token=...</code> в поле «Личный токен VK».</p>
+            <button id="vk-oauth-button" class="button secondary" type="button">Получить новый токен VK</button>
+            <p id="vk-oauth-error" class="form-error" role="alert" hidden></p>
+          </div>
+          {% endif %}
         </div></details>
         {% endfor %}
         <details><summary>Сеть и сайт</summary><div class="settings-grid">
@@ -82,6 +90,26 @@
     } catch (_) {
       // The form remains usable when browser storage is disabled.
     }
+    const vkOauthButton = document.getElementById('vk-oauth-button');
+    vkOauthButton.addEventListener('click', () => {
+      const clientId = document.getElementById('vk-client_id').value.trim();
+      const oauthError = document.getElementById('vk-oauth-error');
+      if (!/^\d+$/.test(clientId)) {
+        oauthError.textContent = 'Сначала укажите числовой ID приложения VK.';
+        oauthError.hidden = false;
+        return;
+      }
+      oauthError.hidden = true;
+      const query = new URLSearchParams({
+        client_id: clientId,
+        scope: 'wall,photos,offline',
+        redirect_uri: 'https://oauth.vk.com/blank.html',
+        display: 'page',
+        response_type: 'token',
+        v: '5.131'
+      });
+      window.open(`https://oauth.vk.com/authorize?${query}`, '_blank', 'noopener');
+    });
     publishForm.addEventListener('submit', () => {
       const selected = [...publishForm.querySelectorAll('input[name="platforms"]:checked')]
         .map((input) => input.nextElementSibling.textContent.trim());
