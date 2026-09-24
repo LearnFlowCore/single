@@ -67,6 +67,20 @@
     </section>
   </main>
   <div id="publish-modal" class="publish-modal" role="dialog" aria-modal="true" aria-labelledby="publish-title" aria-hidden="true">
+    {% for side in ['left', 'right'] %}
+    <div class="pixel-pony pony-{{ side }} loading-decoration" data-decoration="pony" aria-hidden="true">
+      <span class="pony-horn"></span><span class="pony-ear"></span><span class="pony-head"></span>
+      <span class="pony-eye"></span><span class="pony-mane"></span><span class="pony-body"></span>
+      <span class="pony-tail"></span><span class="pony-leg leg-one"></span><span class="pony-leg leg-two"></span>
+      <span class="pony-leg leg-three"></span><span class="pony-leg leg-four"></span>
+    </div>
+    {% endfor %}
+    <div class="loading-symbol symbol-left loading-decoration" data-decoration="butterfly" aria-hidden="true">🦋︎</div>
+    <div class="loading-symbol symbol-right loading-decoration" data-decoration="butterfly" aria-hidden="true">🦋︎</div>
+    <div class="loading-symbol symbol-left loading-decoration" data-decoration="coffee" aria-hidden="true">☕︎</div>
+    <div class="loading-symbol symbol-right loading-decoration" data-decoration="coffee" aria-hidden="true">☕︎</div>
+    <div class="loading-symbol symbol-left loading-decoration" data-decoration="emoji" aria-hidden="true">★</div>
+    <div class="loading-symbol symbol-right loading-decoration" data-decoration="emoji" aria-hidden="true">★</div>
     <div class="publish-progress">
       <div class="spinner" aria-hidden="true"></div>
       <p class="eyebrow">Публикация</p>
@@ -117,6 +131,11 @@
       document.getElementById('publish-platforms').textContent = selected.join(' · ');
       document.getElementById('publish-button').disabled = true;
       const modal = document.getElementById('publish-modal');
+      const decorationTypes = ['pony', 'butterfly', 'coffee', 'emoji'];
+      const selectedDecoration = decorationTypes[Math.floor(Math.random() * decorationTypes.length)];
+      modal.querySelectorAll('.loading-decoration').forEach((item) => {
+        item.classList.toggle('active', item.dataset.decoration === selectedDecoration);
+      });
       modal.classList.add('visible');
       modal.setAttribute('aria-hidden', 'false');
       document.body.classList.add('publishing');
