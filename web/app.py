@@ -32,6 +32,7 @@ VK_OAUTH_REDIRECT_URI = os.getenv(
     "AUTOPOSTER_VK_OAUTH_REDIRECT_URI",
     "https://single-7z3r.onrender.com/vk/oauth/callback",
 )
+VK_OAUTH_CLIENT_ID = os.getenv("AUTOPOSTER_VK_CLIENT_ID", "14433572")
 VK_OAUTH_TARGET_ORIGIN = os.getenv(
     "AUTOPOSTER_VK_OAUTH_TARGET_ORIGIN", "http://158.160.237.113"
 )
@@ -322,6 +323,7 @@ def _dashboard_response(
             "settings": settings,
             "credentials": credentials,
             "render_url": str(request.base_url).rstrip("/"),
+            "vk_oauth_client_id": VK_OAUTH_CLIENT_ID,
             "vk_oauth_redirect_uri": VK_OAUTH_REDIRECT_URI,
             "now": datetime.now(),
         },

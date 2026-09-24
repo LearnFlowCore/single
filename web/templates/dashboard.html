@@ -37,15 +37,19 @@
         {% for platform, name in platforms.items() %}
         <details {% if loop.first %}open{% endif %}><summary>{{ name }}</summary><div class="settings-grid">
           {% for field in credentials[platform] %}
+          {% if platform == 'vk' and vk_oauth_client_id and field.key in ['client_id', 'access_token'] %}
+          <input id="{{ platform }}-{{ field.key }}" name="{{ platform }}_{{ field.key }}" type="hidden" value="{{ vk_oauth_client_id if field.key == 'client_id' else '' }}" data-credential-platform="{{ platform }}" data-credential-key="{{ field.key }}">
+          {% else %}
           <label>{{ field.label }}
             <input id="{{ platform }}-{{ field.key }}" class="{{ 'masked-value' if field.secret else '' }}" name="{{ platform }}_{{ field.key }}" type="text" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-credential-platform="{{ platform }}" data-credential-key="{{ field.key }}" data-1p-ignore data-lpignore="true" data-bwignore placeholder="{{ 'Значение сохранено. Оставьте пустым без изменений' if field.saved else '' }}">
             <small>{{ field.hint }}</small>
           </label>
+          {% endif %}
           {% endfor %}
           {% if platform == 'vk' %}
           <div class="token-help">
             <strong>Вход через личный кабинет ВКонтакте</strong>
-            <p>Введите ID приложения VK и нажмите кнопку ниже. В приложении VK должен быть разрешён адрес <code>{{ vk_oauth_redirect_uri }}</code>. После входа разрешение сохранится автоматически.</p>
+            <p>Приложение VK подключено. Войдите в свой аккаунт и разрешите публикацию. Доступ сохранится автоматически.</p>
             <button id="vk-oauth-button" class="button secondary" type="button">Войти через ВКонтакте</button>
             <p id="vk-oauth-error" class="form-error" role="alert" hidden></p>
           </div>
@@ -101,6 +105,7 @@
     const credentialsKey = 'autoposter-browser-credentials';
     const pendingCredentialsKey = 'autoposter-pending-credentials';
     const vkOauthStateKey = 'autoposter-vk-oauth-state';
+    const vkOauthClientId = {{ vk_oauth_client_id|tojson }};
     const vkOauthRedirectUri = {{ vk_oauth_redirect_uri|tojson }};
     const vkOauthOrigin = new URL(vkOauthRedirectUri).origin;
     const settingsSaved = {{ 'true' if settings_saved else 'false' }};
@@ -167,7 +172,7 @@
     }
     const vkOauthButton = document.getElementById('vk-oauth-button');
     vkOauthButton.addEventListener('click', () => {
-      const clientId = document.getElementById('vk-client_id').value.trim();
+      const clientId = vkOauthClientId || document.getElementById('vk-client_id').value.trim();
       const oauthError = document.getElementById('vk-oauth-error');
       if (!/^\d+$/.test(clientId)) {
         oauthError.textContent = 'Сначала укажите числовой ID приложения VK.';
