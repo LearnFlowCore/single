@@ -2,6 +2,7 @@
 build/
 __pycache__/
 *.py[cod]
+!dist/**/*.pyd
 *.db
 *.sqlite
 *.sqlite3

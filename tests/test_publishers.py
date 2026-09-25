@@ -29,11 +29,24 @@ from web.app import (
     _new_vk_oauth_state,
     _update_credentials,
     _valid_vk_oauth_state,
+    WINDOWS_DOWNLOAD_URL,
     app,
 )
 
 
 class CoreTests(unittest.TestCase):
+    def test_web_download_falls_back_to_github_when_build_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("web.app.PROJECT_ROOT", Path(directory)):
+                with TestClient(app) as client:
+                    landing = client.get("/")
+                    download = client.get("/download", follow_redirects=False)
+
+        self.assertEqual(landing.status_code, 200)
+        self.assertIn('href="/download"', landing.text)
+        self.assertEqual(download.status_code, 302)
+        self.assertEqual(download.headers["location"], WINDOWS_DOWNLOAD_URL)
+
     def test_media_validation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / "photo.jpg"

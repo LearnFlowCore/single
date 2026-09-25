@@ -32,6 +32,10 @@ from utils.network import resolve_network
 
 ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
+WINDOWS_DOWNLOAD_URL = (
+    "https://github.com/LearnFlowCore/single/raw/refs/heads/main/dist/"
+    "Okno-v-drugoi-mir-safe.zip"
+)
 UPLOAD_DIR = APP_DIR / "web_uploads"
 VK_OAUTH_REDIRECT_URI = os.getenv(
     "AUTOPOSTER_VK_OAUTH_REDIRECT_URI",
@@ -210,9 +214,8 @@ def _login_redirect() -> RedirectResponse:
 
 @app.get("/", response_class=HTMLResponse)
 async def landing(request: Request):  # type: ignore[no-untyped-def]
-    exe_exists = (PROJECT_ROOT / "dist" / "Okno-v-drugoi-mir-safe.zip").is_file()
     return templates.TemplateResponse(
-        request, "landing.html", {"authenticated": _authenticated(request), "exe_exists": exe_exists}
+        request, "landing.html", {"authenticated": _authenticated(request)}
     )
 
 
@@ -476,7 +479,7 @@ async def delete_post(request: Request, post_id: int):  # type: ignore[no-untype
 async def download():  # type: ignore[no-untyped-def]
     path = PROJECT_ROOT / "dist" / "Okno-v-drugoi-mir-safe.zip"
     if not path.is_file():
-        return HTMLResponse("Сборка «Окно в другой мир» пока не опубликована", status_code=404)
+        return RedirectResponse(WINDOWS_DOWNLOAD_URL, status_code=302)
     return FileResponse(
         path,
         filename="Okno-v-drugoi-mir-safe.zip",
