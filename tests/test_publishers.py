@@ -101,6 +101,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertIn("autoposter-vk-oauth", response.text)
         self.assertIn("http://158.160.237.113", response.text)
+        self.assertIn("http://testserver", response.text)
 
     def test_vk_token_reset_requires_login(self) -> None:
         with TestClient(app) as client:

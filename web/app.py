@@ -150,10 +150,16 @@ async def login_page(request: Request):  # type: ignore[no-untyped-def]
 
 @app.get("/vk/oauth/callback", response_class=HTMLResponse)
 async def vk_oauth_callback(request: Request):  # type: ignore[no-untyped-def]
+    target_origins = sorted(
+        {
+            VK_OAUTH_TARGET_ORIGIN.rstrip("/"),
+            str(request.base_url).rstrip("/"),
+        }
+    )
     response = templates.TemplateResponse(
         request,
         "vk_oauth_callback.html",
-        {"target_origin": VK_OAUTH_TARGET_ORIGIN},
+        {"target_origins": target_origins},
     )
     response.headers["Cache-Control"] = "no-store"
     return response
