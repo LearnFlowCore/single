@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+from urllib.parse import parse_qs
 
 import httpx
 from fastapi.testclient import TestClient
@@ -13,6 +15,7 @@ from PIL import Image
 from api.base import AuthenticationError
 from api.instagram_publisher import InstagramPublisher
 from api.max_publisher import MaxPostData, MaxPublisher
+from api.ok_publisher import OkPostData, OkPublisher
 from api.telegram_publisher import TelegramPostData, TelegramPublisher
 from api.vk_publisher import VKPostData, VKPublisher
 from utils.auth import SecretStore, extract_vk_access_token
@@ -132,6 +135,27 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(stored["vk"]["client_id"], "server-client-id")
         self.assertEqual(stored["vk"]["group_id"], "123")
 
+    def test_browser_credentials_cannot_override_ok_secrets(self) -> None:
+        stored = SecretStore(Path("missing-secrets.json")).load()
+        stored["ok"]["access_token"] = "server-token"
+
+        _merge_browser_credentials(
+            stored,
+            json.dumps(
+                {
+                    "ok": {
+                        "access_token": "browser-token",
+                        "session_secret_key": "browser-secret",
+                        "group_id": "999",
+                    }
+                }
+            ),
+        )
+
+        self.assertEqual(stored["ok"]["access_token"], "server-token")
+        self.assertEqual(stored["ok"]["session_secret_key"], "")
+        self.assertEqual(stored["ok"]["group_id"], "")
+
     def test_direct_network_ignores_environment(self) -> None:
         network = resolve_network("direct")
         self.assertIsNone(network.proxy)
@@ -163,6 +187,71 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(calls, ["/me", "/chats/123/members/me", "/messages"])
         finally:
             await publisher.aclose()
+
+    async def test_ok_auth_and_group_text_request_are_signed(self) -> None:
+        calls: list[dict[str, str]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            values = {key: items[0] for key, items in parse_qs(request.content.decode()).items()}
+            calls.append(values)
+            signature = values.pop("sig")
+            values.pop("access_token")
+            source = "".join(f"{key}={value}" for key, value in sorted(values.items()))
+            self.assertEqual(signature, hashlib.md5(f"{source}session-secret".encode()).hexdigest())
+            if values["method"] == "users.getCurrentUser":
+                return httpx.Response(200, json={"uid": "42", "name": "Тест"})
+            return httpx.Response(200, json="987654321")
+
+        publisher = OkPublisher(
+            "app-id", "public-key", "app-secret", "access-token", "session-secret", "123"
+        )
+        await publisher._client.aclose()
+        publisher._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        try:
+            account = await publisher.authenticate()
+            result = await publisher.publish(OkPostData(text="Проверка OK"))
+            self.assertEqual(account["id"], "42")
+            self.assertEqual(result["topic_id"], "987654321")
+            self.assertEqual(result["url"], "https://ok.ru/group/123/topic/987654321")
+            attachment = json.loads(calls[1]["attachment"])
+            self.assertEqual(attachment["media"][0]["text"], "Проверка OK")
+            self.assertEqual(calls[1]["type"], "GROUP_THEME")
+            self.assertEqual(calls[1]["gid"], "123")
+        finally:
+            await publisher.aclose()
+
+    async def test_ok_group_photo_upload(self) -> None:
+        methods: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "upload.okcdn.ru":
+                self.assertIn(b'name="pic1"', request.content)
+                return httpx.Response(200, json={"photos": {"photo-id": {"token": "photo-token"}}})
+            values = {key: items[0] for key, items in parse_qs(request.content.decode()).items()}
+            methods.append(values["method"])
+            if values["method"] == "photosV2.getUploadUrl":
+                return httpx.Response(
+                    200,
+                    json={"upload_url": "https://upload.okcdn.ru/photos", "photo_ids": ["photo-id"]},
+                )
+            attachment = json.loads(values["attachment"])
+            self.assertEqual(attachment["media"][0]["list"][0]["id"], "photo-token")
+            return httpx.Response(200, json="topic-id")
+
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "photo.jpg"
+            Image.new("RGB", (640, 480), "orange").save(image, "JPEG")
+            publisher = OkPublisher(
+                "app-id", "public-key", "app-secret", "access-token", "session-secret", "123"
+            )
+            await publisher._client.aclose()
+            publisher._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+            try:
+                result = await publisher.publish(OkPostData(media=[str(image)]))
+                self.assertEqual(result["topic_id"], "topic-id")
+                self.assertEqual(methods, ["photosV2.getUploadUrl", "mediatopic.post"])
+            finally:
+                await publisher.aclose()
 
     async def test_telegram_text_request(self) -> None:
         captured: dict[str, str] = {}

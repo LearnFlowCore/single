@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
 
 from api.instagram_publisher import InstagramPostData, InstagramPublisher
 from api.max_publisher import MaxPostData, MaxPublisher
+from api.ok_publisher import OkPostData, OkPublisher
 from api.telegram_publisher import TelegramPostData, TelegramPublisher
 from api.vk_publisher import VKPostData, VKPublisher
 from config.settings import Settings
@@ -58,6 +59,7 @@ import httpx
 LOGGER = logging.getLogger(__name__)
 PLATFORM_NAMES = {
     "vk": "ВКонтакте",
+    "ok": "Одноклассники",
     "instagram": "Instagram",
     "telegram": "Telegram",
     "max": "MAX",
@@ -160,6 +162,18 @@ class PublishThread(QThread):
                 proxy=network.proxy,
                 trust_env=network.trust_env,
             ), MaxPostData(text=self.text, media=media_paths)
+        if platform == "ok":
+            values = self.secrets["ok"]
+            return OkPublisher(
+                values["application_id"],
+                values["application_key"],
+                values["application_secret"],
+                values["access_token"],
+                values["session_secret_key"],
+                values["group_id"],
+                proxy=network.proxy,
+                trust_env=network.trust_env,
+            ), OkPostData(text=self.text, media=media_paths)
         raise ValueError(f"Неизвестная платформа: {platform}")
 
     @staticmethod
@@ -224,6 +238,18 @@ class AuthCheckThread(QThread):
                     proxy=network.proxy,
                     trust_env=network.trust_env,
                 )
+            elif self.platform == "ok":
+                values = self.secrets["ok"]
+                publisher = OkPublisher(
+                    values["application_id"],
+                    values["application_key"],
+                    values["application_secret"],
+                    values["access_token"],
+                    values["session_secret_key"],
+                    values["group_id"],
+                    proxy=network.proxy,
+                    trust_env=network.trust_env,
+                )
             else:
                 raise ValueError(f"Неизвестная платформа: {self.platform}")
             account = await publisher.authenticate()
@@ -245,6 +271,7 @@ class NetworkCheckThread(QThread):
         "Instagram": "https://graph.facebook.com/",
         "Telegram": "https://api.telegram.org/",
         "MAX": "https://platform-api2.max.ru/",
+        "Одноклассники": "https://api.ok.ru/",
     }
 
     def __init__(self, settings: Settings) -> None:
@@ -485,6 +512,14 @@ class MainWindow(QMainWindow):
                 ("chat_id", "Канал или chat_id"),
             ],
             "max": [("bot_token", "Токен бота MAX"), ("chat_id", "chat_id канала или чата")],
+            "ok": [
+                ("application_id", "Application ID"),
+                ("application_key", "Публичный ключ"),
+                ("application_secret", "Секретный ключ"),
+                ("access_token", "Access token"),
+                ("session_secret_key", "Session secret key"),
+                ("group_id", "ID группы"),
+            ],
         }
         for platform, field_defs in definitions.items():
             tab = QWidget()
@@ -747,6 +782,7 @@ class MainWindow(QMainWindow):
             "instagram": ("access_token", "Введите long-lived access token Instagram."),
             "telegram": ("bot_token", "Введите токен Telegram-бота."),
             "max": ("bot_token", "Введите токен бота MAX."),
+            "ok": ("access_token", "Введите access token Одноклассников."),
         }
         key, message = required[platform]
         if not self.secrets[platform][key]:
@@ -768,6 +804,15 @@ class MainWindow(QMainWindow):
                 int(chat_id)
             except ValueError:
                 QMessageBox.warning(self, "Проверка: MAX", "chat_id MAX должен быть числом.")
+                return
+        if platform == "ok":
+            group_id = self.secrets["ok"]["group_id"]
+            if not group_id.isdigit() or int(group_id) <= 0:
+                QMessageBox.warning(
+                    self,
+                    "Проверка: Одноклассники",
+                    "ID группы OK должен быть положительным числом.",
+                )
                 return
         thread = AuthCheckThread(platform, self.secrets, self.settings)
         thread.done.connect(self._connection_checked)

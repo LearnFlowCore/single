@@ -39,12 +39,26 @@ VK_OAUTH_CLIENT_ID = os.getenv("AUTOPOSTER_VK_CLIENT_ID", "")
 VK_OAUTH_TARGET_ORIGIN = os.getenv(
     "AUTOPOSTER_VK_OAUTH_TARGET_ORIGIN", "http://158.160.237.113"
 )
-PLATFORMS = {"vk": "ВКонтакте", "instagram": "Instagram", "telegram": "Telegram", "max": "MAX"}
+PLATFORMS = {
+    "vk": "ВКонтакте",
+    "ok": "Одноклассники",
+    "instagram": "Instagram",
+    "telegram": "Telegram",
+    "max": "MAX",
+}
 CREDENTIAL_FIELDS = {
     "vk": [
         ("client_id", "ID приложения VK", "ID standalone-приложения, если получаете токен через OAuth."),
         ("access_token", "Личный токен VK", "Вставьте access token или полный URL после авторизации VK."),
         ("group_id", "ID группы", "Числовой ID без минуса; оставьте пустым для своей страницы."),
+    ],
+    "ok": [
+        ("application_id", "Application ID", "ID OAuth-приложения OK."),
+        ("application_key", "Публичный ключ", "Публичный ключ приложения OK."),
+        ("application_secret", "Секретный ключ", "Секретный ключ приложения OK."),
+        ("access_token", "Access token", "Постоянный токен из настроек приложения OK."),
+        ("session_secret_key", "Session secret key", "Ключ сессии, выданный вместе с токеном."),
+        ("group_id", "ID группы", "Положительный числовой ID группы OK."),
     ],
     "instagram": [
         ("app_id", "Meta App ID", "ID приложения Meta."),
@@ -321,6 +335,15 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
                 error_target="settings",
                 vk_reconnect_required=vk_reconnect_required,
             )
+    if any(platform == "ok" for platform, _ in changed_credentials):
+        try:
+            await authenticate_platform("ok", stored, settings)
+        except Exception as exc:
+            return _dashboard_response(
+                request,
+                error=f"Данные Одноклассников не сохранены: {exc}",
+                error_target="settings",
+            )
     try:
         secret_store.save(stored)
         settings.save()
@@ -470,7 +493,7 @@ def _merge_browser_credentials(
         if not isinstance(values, dict):
             continue
         for key in fields:
-            if platform == "vk" and key in {"access_token", "client_id"}:
+            if platform == "ok" or (platform == "vk" and key in {"access_token", "client_id"}):
                 continue
             value = values.get(key)
             if isinstance(value, str) and value.strip():

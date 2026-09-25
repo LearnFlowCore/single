@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QWidget
 class PlatformSelector(QWidget):
     LABELS = {
         "vk": "ВКонтакте",
+        "ok": "Одноклассники",
         "instagram": "Instagram",
         "telegram": "Telegram",
         "max": "MAX",

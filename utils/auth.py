@@ -20,6 +20,14 @@ EMPTY_SECRETS: dict[str, dict[str, str]] = {
     },
     "telegram": {"bot_token": "", "chat_id": ""},
     "max": {"bot_token": "", "chat_id": ""},
+    "ok": {
+        "application_id": "",
+        "application_key": "",
+        "application_secret": "",
+        "access_token": "",
+        "session_secret_key": "",
+        "group_id": "",
+    },
 }
 
 

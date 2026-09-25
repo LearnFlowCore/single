@@ -8,6 +8,7 @@ from typing import Any
 
 from api.instagram_publisher import InstagramPostData, InstagramPublisher
 from api.max_publisher import MaxPostData, MaxPublisher
+from api.ok_publisher import OkPostData, OkPublisher
 from api.telegram_publisher import TelegramPostData, TelegramPublisher
 from api.vk_publisher import VKPostData, VKPublisher
 from config.settings import Settings
@@ -118,6 +119,17 @@ def _build(
         return MaxPublisher(values["bot_token"], values["chat_id"], **common), MaxPostData(
             text=text, media=media_paths
         )
+    if platform == "ok":
+        values = secrets["ok"]
+        return OkPublisher(
+            values["application_id"],
+            values["application_key"],
+            values["application_secret"],
+            values["access_token"],
+            values["session_secret_key"],
+            values["group_id"],
+            **common,
+        ), OkPostData(text=text, media=media_paths)
     raise ValueError(f"Неизвестная платформа: {platform}")
 
 

@@ -31,7 +31,7 @@
     <section class="settings panel">
       <div class="section-heading"><p class="eyebrow">Подключения</p><h2>Токены и сеть</h2></div>
       <p class="section-note">Токены используются только для публикации и не заменяют логин и пароль этой панели.</p>
-      <p class="browser-storage-note">Токен VK хранится только на сервере. Данные остальных подключений могут сохраняться в этом браузере.</p>
+      <p class="browser-storage-note">Токены VK и Одноклассников хранятся только на сервере. Данные остальных подключений могут сохраняться в этом браузере.</p>
       {% if error and error_target == 'settings' %}<div class="notice error inline-notice" role="alert">{{ error }}</div>{% endif %}
       <form id="settings-form" method="post" action="/settings" autocomplete="off">
         {% for platform, name in platforms.items() %}
@@ -63,6 +63,11 @@
             <button id="vk-reset-button" class="button secondary" type="submit" formaction="/settings/vk/reset" formmethod="post" {{ 'disabled' if vk_env_managed else '' }}>{{ 'Токен управляется сервером' if vk_env_managed else 'Сбросить токен VK' }}</button>
             {% endif %}
             <p id="vk-oauth-error" class="form-error" role="alert" hidden></p>
+          </div>
+          {% elif platform == 'ok' %}
+          <div class="token-help">
+            <strong>Публикация в группу Одноклассников</strong>
+            <p>Приложению нужны права <code>GROUP_CONTENT</code> и <code>VALUABLE_ACCESS</code>. Для публикации фотографий также запросите <code>PHOTO_CONTENT</code>.</p>
           </div>
           {% endif %}
         </div></details>
@@ -146,9 +151,17 @@
         delete browserCredentials.vk.client_id;
         localStorage.setItem(credentialsKey, JSON.stringify(browserCredentials));
       }
+      if (browserCredentials.ok) {
+        delete browserCredentials.ok;
+        localStorage.setItem(credentialsKey, JSON.stringify(browserCredentials));
+      }
       if (pendingCredentials.vk) {
         delete pendingCredentials.vk.access_token;
         delete pendingCredentials.vk.client_id;
+        sessionStorage.setItem(pendingCredentialsKey, JSON.stringify(pendingCredentials));
+      }
+      if (pendingCredentials.ok) {
+        delete pendingCredentials.ok;
         sessionStorage.setItem(pendingCredentialsKey, JSON.stringify(pendingCredentials));
       }
       if (settingsSaved) {
@@ -173,6 +186,7 @@
           pending[platform] = pending[platform] || {};
           const key = input.dataset.credentialKey;
           if (platform === 'vk' && ['access_token', 'client_id'].includes(key)) return;
+          if (platform === 'ok') return;
           pending[platform][key] = value;
         });
         sessionStorage.setItem(pendingCredentialsKey, JSON.stringify(pending));
@@ -291,6 +305,11 @@
       document.querySelector('.admin-header').inert = false;
       document.getElementById('publish-button').disabled = false;
       modal.querySelectorAll('.loading-decoration').forEach((item) => item.classList.remove('active'));
+    });
+    window.addEventListener('pagehide', () => {
+      document.querySelectorAll('[data-credential-platform="ok"]').forEach((input) => {
+        input.value = '';
+      });
     });
     document.querySelectorAll('.delete-form').forEach((form) => {
       form.addEventListener('submit', (event) => {
