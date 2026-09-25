@@ -15,8 +15,8 @@
   <script>
     (() => {
       const targetOrigins = {{ target_origins|tojson }};
-      const values = new URLSearchParams(window.location.hash.slice(1));
-      const accessToken = values.get('access_token');
+      const values = new URLSearchParams(window.location.search);
+      const authorizationCode = values.get('code');
       const state = values.get('state');
       const error = values.get('error_description') || values.get('error');
       const status = document.getElementById('oauth-status');
@@ -29,12 +29,12 @@
       const payload = {
         type: 'autoposter-vk-oauth',
         state,
-        accessToken,
-        error: error || (!accessToken ? 'VK не вернул разрешение на доступ.' : '')
+        authorizationCode,
+        error: error || (!authorizationCode ? 'VK не вернул код авторизации.' : '')
       };
       targetOrigins.forEach((origin) => window.opener.postMessage(payload, origin));
       status.textContent = error ? 'ВКонтакте отклонил авторизацию.' : 'Вход выполнен. Это окно можно закрыть.';
-      if (!error && accessToken) setTimeout(() => window.close(), 700);
+      if (!error && authorizationCode) setTimeout(() => window.close(), 700);
     })();
   </script>
 </body>

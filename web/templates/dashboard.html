@@ -34,13 +34,17 @@
       <p class="browser-storage-note">Токены VK и Одноклассников хранятся только на сервере. Данные остальных подключений могут сохраняться в этом браузере.</p>
       {% if error and error_target == 'settings' %}<div class="notice error inline-notice" role="alert">{{ error }}</div>{% endif %}
       <form id="settings-form" method="post" action="/settings" autocomplete="off">
+        <input id="vk-oauth-code" name="vk_oauth_code" type="hidden" value="">
+        <input id="vk-oauth-state" name="vk_oauth_state" type="hidden" value="">
         {% for platform, name in platforms.items() %}
         <details {% if loop.first %}open{% endif %}><summary>{{ name }}</summary><div class="settings-grid">
           {% for field in credentials[platform] %}
           {% if platform == 'vk' and field.key == 'access_token' and (vk_connected or vk_reconnect_required) %}
           <input id="vk-access_token" name="vk_access_token" type="hidden" value="" data-credential-platform="vk" data-credential-key="access_token">
-          {% elif platform == 'vk' and vk_oauth_client_id and field.key in ['client_id', 'access_token'] %}
-          <input id="{{ platform }}-{{ field.key }}" name="{{ platform }}_{{ field.key }}" type="hidden" value="{{ vk_oauth_client_id if field.key == 'client_id' else '' }}" data-credential-platform="{{ platform }}" data-credential-key="{{ field.key }}">
+          {% elif platform == 'vk' and vk_oauth_client_id and field.key == 'client_id' %}
+          <input id="vk-client_id" name="vk_client_id" type="hidden" value="{{ vk_oauth_client_id }}" data-credential-platform="vk" data-credential-key="client_id">
+          {% elif platform == 'vk' and vk_oauth_env_client_secret and field.key == 'client_secret' %}
+          <input id="vk-client_secret" name="vk_client_secret" type="hidden" value="" data-credential-platform="vk" data-credential-key="client_secret">
           {% else %}
           <label>{{ field.label }}
             <input id="{{ platform }}-{{ field.key }}" class="{{ 'masked-value' if field.secret else '' }}" name="{{ platform }}_{{ field.key }}" type="text" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-credential-platform="{{ platform }}" data-credential-key="{{ field.key }}" data-1p-ignore data-lpignore="true" data-bwignore placeholder="{{ '' if platform == 'vk' and field.key == 'client_id' else ('Значение сохранено. Оставьте пустым без изменений' if field.saved else '') }}">
@@ -56,7 +60,7 @@
             {% elif vk_connected %}
             <p><span class="status success">Подключён</span> Токен хранится на сервере и не выводится в кабинет.</p>
             {% else %}
-            <p>Вставьте личный токен или полный URL с <code>access_token=...</code>. Для получения нового токена укажите ID активного Standalone-приложения. Все запросы к VK API выполняются только сервером.</p>
+            <p>Вставьте готовый личный <code>access_token</code> и сохраните настройки. ID и защищённый ключ приложения нужны только для необязательной кнопки OAuth-входа.</p>
             {% endif %}
             {% if not vk_connected or (vk_reconnect_required and not vk_env_managed) %}<button id="vk-oauth-button" class="button secondary" type="button">Войти через ВКонтакте</button>{% endif %}
             {% if vk_connected and not vk_reconnect_required %}
@@ -73,7 +77,7 @@
         </div></details>
         {% endfor %}
         <details><summary>Сеть и сайт</summary><div class="settings-grid">
-          <p class="render-address">Текущий адрес Render: <a href="{{ render_url }}" target="_blank" rel="noopener noreferrer">{{ render_url }}</a></p>
+          <p class="render-address">Текущий адрес сайта: <a href="{{ site_url }}" target="_blank" rel="noopener noreferrer">{{ site_url }}</a></p>
           <label>Режим сети<select name="network_mode"><option value="system" {{ 'selected' if settings.network_mode == 'system' }}>Системный</option><option value="direct" {{ 'selected' if settings.network_mode == 'direct' }}>Прямой</option><option value="proxy" {{ 'selected' if settings.network_mode == 'proxy' }}>Прокси</option></select></label>
           <label>Прокси<input name="proxy_url" value="{{ settings.proxy_url }}"></label>
           <label>Публичный URL медиа<input name="public_media_base_url" value="{{ settings.public_media_base_url }}"></label>
@@ -121,8 +125,10 @@
     const credentialsKey = 'autoposter-browser-credentials';
     const pendingCredentialsKey = 'autoposter-pending-credentials';
     const vkOauthStateKey = 'autoposter-vk-oauth-state';
-    const vkOauthClientId = {{ vk_oauth_client_id|tojson }};
+    const vkOauthEffectiveClientId = {{ vk_oauth_effective_client_id|tojson }};
+    const vkOauthClientSecretConfigured = {{ 'true' if vk_oauth_client_secret_configured else 'false' }};
     const vkOauthRedirectUri = {{ vk_oauth_redirect_uri|tojson }};
+    const vkOauthState = {{ vk_oauth_state|tojson }};
     const vkOauthOrigin = new URL(vkOauthRedirectUri).origin;
     const settingsSaved = {{ 'true' if settings_saved else 'false' }};
     const settingsFailed = {{ 'true' if error and error_target == 'settings' else 'false' }};
@@ -149,6 +155,7 @@
       if (browserCredentials.vk) {
         delete browserCredentials.vk.access_token;
         delete browserCredentials.vk.client_id;
+        delete browserCredentials.vk.client_secret;
         localStorage.setItem(credentialsKey, JSON.stringify(browserCredentials));
       }
       if (browserCredentials.ok) {
@@ -158,6 +165,7 @@
       if (pendingCredentials.vk) {
         delete pendingCredentials.vk.access_token;
         delete pendingCredentials.vk.client_id;
+        delete pendingCredentials.vk.client_secret;
         sessionStorage.setItem(pendingCredentialsKey, JSON.stringify(pendingCredentials));
       }
       if (pendingCredentials.ok) {
@@ -185,7 +193,7 @@
           const platform = input.dataset.credentialPlatform;
           pending[platform] = pending[platform] || {};
           const key = input.dataset.credentialKey;
-          if (platform === 'vk' && ['access_token', 'client_id'].includes(key)) return;
+          if (platform === 'vk' && ['access_token', 'client_id', 'client_secret'].includes(key)) return;
           if (platform === 'ok') return;
           pending[platform][key] = value;
         });
@@ -210,26 +218,29 @@
       });
     }
     if (vkOauthButton) vkOauthButton.addEventListener('click', () => {
-      const clientId = vkOauthClientId || document.getElementById('vk-client_id').value.trim();
+      const clientId = vkOauthEffectiveClientId || document.getElementById('vk-client_id').value.trim();
+      const clientSecret = document.getElementById('vk-client_secret')?.value.trim();
       const oauthError = document.getElementById('vk-oauth-error');
       if (!/^\d+$/.test(clientId)) {
         oauthError.textContent = 'Сначала укажите числовой ID приложения VK.';
         oauthError.hidden = false;
         return;
       }
+      if (!vkOauthClientSecretConfigured && !clientSecret) {
+        oauthError.textContent = 'Сначала укажите защищённый ключ приложения VK.';
+        oauthError.hidden = false;
+        return;
+      }
       oauthError.hidden = true;
-      const randomValues = new Uint32Array(4);
-      crypto.getRandomValues(randomValues);
-      const state = Array.from(randomValues, (value) => value.toString(16).padStart(8, '0')).join('');
-      sessionStorage.setItem(vkOauthStateKey, state);
+      sessionStorage.setItem(vkOauthStateKey, vkOauthState);
       const query = new URLSearchParams({
         client_id: clientId,
         scope: 'wall,photos,offline',
         redirect_uri: vkOauthRedirectUri,
         display: 'page',
-        response_type: 'token',
+        response_type: 'code',
         v: '5.199',
-        state
+        state: vkOauthState
       });
       const popup = window.open(
         `https://oauth.vk.com/authorize?${query}`,
@@ -251,12 +262,13 @@
         return;
       }
       sessionStorage.removeItem(vkOauthStateKey);
-      if (event.data.error || !event.data.accessToken) {
-        oauthError.textContent = event.data.error || 'VK не вернул разрешение на доступ.';
+      if (event.data.error || !event.data.authorizationCode) {
+        oauthError.textContent = event.data.error || 'VK не вернул код авторизации.';
         oauthError.hidden = false;
         return;
       }
-      document.getElementById('vk-access_token').value = event.data.accessToken;
+      document.getElementById('vk-oauth-code').value = event.data.authorizationCode;
+      document.getElementById('vk-oauth-state').value = event.data.state;
       oauthError.hidden = true;
       if (settingsForm.requestSubmit) settingsForm.requestSubmit();
       else settingsForm.submit();

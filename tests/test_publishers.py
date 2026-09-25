@@ -18,10 +18,19 @@ from api.max_publisher import MaxPostData, MaxPublisher
 from api.ok_publisher import OkPostData, OkPublisher
 from api.telegram_publisher import TelegramPostData, TelegramPublisher
 from api.vk_publisher import VKPostData, VKPublisher
+from config.settings import Settings
 from utils.auth import SecretStore, extract_vk_access_token
 from utils.media import prepare_media_for_publish, validate_media
 from utils.network import resolve_network
-from web.app import app, _credential_view, _merge_browser_credentials, _update_credentials
+from web.app import (
+    _credential_view,
+    _exchange_vk_authorization_code,
+    _merge_browser_credentials,
+    _new_vk_oauth_state,
+    _update_credentials,
+    _valid_vk_oauth_state,
+    app,
+)
 
 
 class CoreTests(unittest.TestCase):
@@ -105,6 +114,14 @@ class CoreTests(unittest.TestCase):
         self.assertIn("autoposter-vk-oauth", response.text)
         self.assertIn("http://158.160.237.113", response.text)
         self.assertIn("http://testserver", response.text)
+        self.assertIn("authorizationCode", response.text)
+        self.assertNotIn("accessToken", response.text)
+
+    def test_vk_oauth_state_is_signed(self) -> None:
+        state = _new_vk_oauth_state()
+
+        self.assertTrue(_valid_vk_oauth_state(state))
+        self.assertFalse(_valid_vk_oauth_state(f"{state}changed"))
 
     def test_vk_token_reset_requires_login(self) -> None:
         with TestClient(app) as client:
@@ -117,6 +134,7 @@ class CoreTests(unittest.TestCase):
         stored = SecretStore(Path("missing-secrets.json")).load()
         stored["vk"]["access_token"] = "server-token"
         stored["vk"]["client_id"] = "server-client-id"
+        stored["vk"]["client_secret"] = "server-client-secret"
 
         _merge_browser_credentials(
             stored,
@@ -125,6 +143,7 @@ class CoreTests(unittest.TestCase):
                     "vk": {
                         "access_token": "browser-token",
                         "client_id": "browser-client-id",
+                        "client_secret": "browser-client-secret",
                         "group_id": "123",
                     }
                 }
@@ -133,6 +152,7 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(stored["vk"]["access_token"], "server-token")
         self.assertEqual(stored["vk"]["client_id"], "server-client-id")
+        self.assertEqual(stored["vk"]["client_secret"], "server-client-secret")
         self.assertEqual(stored["vk"]["group_id"], "123")
 
     def test_browser_credentials_cannot_override_ok_secrets(self) -> None:
@@ -163,6 +183,27 @@ class CoreTests(unittest.TestCase):
 
 
 class PublisherTests(unittest.IsolatedAsyncioTestCase):
+    async def test_vk_authorization_code_is_exchanged_server_side(self) -> None:
+        captured_body = b""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal captured_body
+            captured_body = request.content
+            self.assertEqual(request.url.path, "/access_token")
+            self.assertNotIn("client-secret", str(request.url))
+            return httpx.Response(200, json={"access_token": "server-token", "user_id": 42})
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        with patch("web.app.httpx.AsyncClient", return_value=client):
+            token = await _exchange_vk_authorization_code(
+                "one-time-code", "123", "client-secret", Settings()
+            )
+
+        self.assertEqual(token, "server-token")
+        values = {key: items[0] for key, items in parse_qs(captured_body.decode()).items()}
+        self.assertEqual(values["code"], "one-time-code")
+        self.assertEqual(values["client_secret"], "client-secret")
+
     async def test_max_auth_and_text_request(self) -> None:
         calls: list[str] = []
 

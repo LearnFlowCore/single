@@ -11,7 +11,7 @@ from config.settings import APP_DIR, SECRETS_PATH, _write_json
 
 
 EMPTY_SECRETS: dict[str, dict[str, str]] = {
-    "vk": {"client_id": "", "access_token": "", "group_id": ""},
+    "vk": {"client_id": "", "client_secret": "", "access_token": "", "group_id": ""},
     "instagram": {
         "app_id": "",
         "app_secret": "",

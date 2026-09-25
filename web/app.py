@@ -9,12 +9,14 @@ import json
 import logging
 import os
 import secrets as random_secrets
+import time
 from contextlib import asynccontextmanager, suppress
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
 
+import httpx
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,9 +35,10 @@ PROJECT_ROOT = ROOT.parent
 UPLOAD_DIR = APP_DIR / "web_uploads"
 VK_OAUTH_REDIRECT_URI = os.getenv(
     "AUTOPOSTER_VK_OAUTH_REDIRECT_URI",
-    "https://single-7z3r.onrender.com/vk/oauth/callback",
+    "http://158.160.237.113/vk/oauth/callback",
 )
 VK_OAUTH_CLIENT_ID = os.getenv("AUTOPOSTER_VK_CLIENT_ID", "")
+VK_OAUTH_CLIENT_SECRET = os.getenv("AUTOPOSTER_VK_CLIENT_SECRET", "")
 VK_OAUTH_TARGET_ORIGIN = os.getenv(
     "AUTOPOSTER_VK_OAUTH_TARGET_ORIGIN", "http://158.160.237.113"
 )
@@ -48,8 +51,9 @@ PLATFORMS = {
 }
 CREDENTIAL_FIELDS = {
     "vk": [
-        ("client_id", "ID приложения VK", "ID standalone-приложения, если получаете токен через OAuth."),
-        ("access_token", "Личный токен VK", "Вставьте access token или полный URL после авторизации VK."),
+        ("client_id", "ID приложения VK", "ID OAuth-приложения из кабинета разработчика VK."),
+        ("client_secret", "Защищённый ключ VK", "Защищённый ключ приложения из кабинета разработчика VK."),
+        ("access_token", "Личный токен VK", "Токен получается сервером после входа через VK и не отображается."),
         ("group_id", "ID группы", "Числовой ID без минуса; оставьте пустым для своей страницы."),
     ],
     "ok": [
@@ -76,6 +80,7 @@ CREDENTIAL_FIELDS = {
     ],
 }
 MAX_UPLOAD_BYTES = 250 * 1024 * 1024
+VK_OAUTH_STATE_TTL = 15 * 60
 TEMPORARY_PASSWORD_SHA256 = "2aae8a7eb08409459c32c4a9a74a6059ffa3023e3df041f111dce59b72bcd065"
 
 
@@ -139,6 +144,64 @@ def _session_value() -> str:
 def _authenticated(request: Request) -> bool:
     expected = _session_value()
     return bool(expected) and hmac.compare_digest(request.cookies.get("autoposter_session", ""), expected)
+
+
+def _new_vk_oauth_state() -> str:
+    payload = f"{int(time.time())}.{random_secrets.token_urlsafe(24)}"
+    signature = hmac.new(_session_value().encode("utf-8"), payload.encode("utf-8"), hashlib.sha256)
+    return f"{payload}.{signature.hexdigest()}"
+
+
+def _valid_vk_oauth_state(value: str) -> bool:
+    try:
+        issued_text, nonce, signature = value.split(".", 2)
+        issued = int(issued_text)
+    except (TypeError, ValueError):
+        return False
+    if not nonce or abs(int(time.time()) - issued) > VK_OAUTH_STATE_TTL:
+        return False
+    payload = f"{issued_text}.{nonce}"
+    expected = hmac.new(
+        _session_value().encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+
+async def _exchange_vk_authorization_code(
+    code: str,
+    client_id: str,
+    client_secret: str,
+    settings: Settings,
+) -> str:
+    if not code or not client_id or not client_secret:
+        raise ValueError("Для входа через VK нужны код, ID приложения и защищённый ключ.")
+    network = resolve_network(settings.network_mode, settings.proxy_url)
+    try:
+        async with httpx.AsyncClient(
+            timeout=15.0, proxy=network.proxy, trust_env=network.trust_env
+        ) as client:
+            response = await client.post(
+                "https://oauth.vk.com/access_token",
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uri": VK_OAUTH_REDIRECT_URI,
+                    "code": code,
+                },
+            )
+    except httpx.RequestError as exc:
+        raise ValueError("Сервер не смог обратиться к VK для получения токена.") from exc
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise ValueError("VK вернул некорректный ответ при получении токена.") from exc
+    if not response.is_success or not isinstance(payload, dict) or payload.get("error"):
+        reason = payload.get("error_description") if isinstance(payload, dict) else ""
+        raise ValueError(f"VK не выдал токен{': ' + str(reason) if reason else ''}.")
+    token = str(payload.get("access_token", "")).strip()
+    if not token:
+        raise ValueError("VK не вернул access_token.")
+    return token
 
 
 def _login_redirect() -> RedirectResponse:
@@ -318,6 +381,26 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
         resolve_network(settings.network_mode, settings.proxy_url)
     except ValueError as exc:
         return _dashboard_response(request, error=str(exc), error_target="settings")
+    oauth_code = str(form.get("vk_oauth_code", "")).strip()
+    if oauth_code:
+        oauth_state = str(form.get("vk_oauth_state", "")).strip()
+        if not _valid_vk_oauth_state(oauth_state):
+            return _dashboard_response(
+                request,
+                error="Не удалось подтвердить запрос авторизации VK. Повторите вход.",
+                error_target="settings",
+            )
+        client_id = VK_OAUTH_CLIENT_ID.strip() or stored["vk"]["client_id"]
+        client_secret = VK_OAUTH_CLIENT_SECRET.strip() or stored["vk"]["client_secret"]
+        try:
+            stored["vk"]["access_token"] = await _exchange_vk_authorization_code(
+                oauth_code, client_id, client_secret, settings
+            )
+        except ValueError as exc:
+            return _dashboard_response(
+                request, error=str(exc), error_target="settings"
+            )
+        changed_credentials.add(("vk", "access_token"))
     if ("vk", "access_token") in changed_credentials:
         try:
             await authenticate_platform("vk", stored, settings)
@@ -432,9 +515,17 @@ def _dashboard_response(
             ),
             "vk_env_managed": bool(os.getenv("VK_USER_TOKEN", "").strip()),
             "vk_reconnect_required": vk_reconnect_required,
-            "render_url": str(request.base_url).rstrip("/"),
+            "site_url": str(request.base_url).rstrip("/"),
             "vk_oauth_client_id": VK_OAUTH_CLIENT_ID,
+            "vk_oauth_effective_client_id": (
+                VK_OAUTH_CLIENT_ID.strip() or stored_credentials["vk"]["client_id"]
+            ),
+            "vk_oauth_client_secret_configured": bool(
+                VK_OAUTH_CLIENT_SECRET.strip() or stored_credentials["vk"]["client_secret"]
+            ),
+            "vk_oauth_env_client_secret": bool(VK_OAUTH_CLIENT_SECRET.strip()),
             "vk_oauth_redirect_uri": VK_OAUTH_REDIRECT_URI,
+            "vk_oauth_state": _new_vk_oauth_state(),
             "now": datetime.now(),
         },
     )
@@ -493,7 +584,9 @@ def _merge_browser_credentials(
         if not isinstance(values, dict):
             continue
         for key in fields:
-            if platform == "ok" or (platform == "vk" and key in {"access_token", "client_id"}):
+            if platform == "ok" or (
+                platform == "vk" and key in {"access_token", "client_id", "client_secret"}
+            ):
                 continue
             value = values.get(key)
             if isinstance(value, str) and value.strip():
