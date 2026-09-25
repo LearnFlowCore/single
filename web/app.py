@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets as random_secrets
+from contextlib import asynccontextmanager, suppress
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
@@ -32,7 +35,7 @@ VK_OAUTH_REDIRECT_URI = os.getenv(
     "AUTOPOSTER_VK_OAUTH_REDIRECT_URI",
     "https://single-7z3r.onrender.com/vk/oauth/callback",
 )
-VK_OAUTH_CLIENT_ID = os.getenv("AUTOPOSTER_VK_CLIENT_ID", "14433572")
+VK_OAUTH_CLIENT_ID = os.getenv("AUTOPOSTER_VK_CLIENT_ID", "")
 VK_OAUTH_TARGET_ORIGIN = os.getenv(
     "AUTOPOSTER_VK_OAUTH_TARGET_ORIGIN", "http://158.160.237.113"
 )
@@ -61,8 +64,35 @@ CREDENTIAL_FIELDS = {
 MAX_UPLOAD_BYTES = 250 * 1024 * 1024
 TEMPORARY_PASSWORD_SHA256 = "2aae8a7eb08409459c32c4a9a74a6059ffa3023e3df041f111dce59b72bcd065"
 
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):  # type: ignore[no-untyped-def]
+    token = os.getenv("VK_USER_TOKEN", "").strip()
+    check_task: asyncio.Task[None] | None = None
+
+    async def check_vk_token() -> None:
+        credentials = SecretStore().load()
+        credentials["vk"]["access_token"] = token
+        credentials["vk"]["group_id"] = ""
+        try:
+            account = await authenticate_platform("vk", credentials, Settings.load())
+            logging.getLogger(__name__).info(
+                "VK startup check succeeded user_id=%s", account.get("id", "unknown")
+            )
+        except Exception as exc:
+            logging.getLogger(__name__).error("VK startup check failed: %s", exc)
+
+    if token:
+        check_task = asyncio.create_task(check_vk_token())
+    yield
+    if check_task is not None and not check_task.done():
+        check_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await check_task
+
+
 configure_logging()
-app = FastAPI(title="Окно в другой мир", docs_url=None, redoc_url=None)
+app = FastAPI(title="Окно в другой мир", docs_url=None, redoc_url=None, lifespan=_lifespan)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 templates = Jinja2Templates(directory=ROOT / "templates")
 repository = PostRepository()
@@ -213,6 +243,11 @@ async def publish(
             text=text.strip(), media_paths=paths, platforms=selected, status="publishing"
         )
         results = await publish_post(text.strip(), paths, selected, credentials, Settings.load())
+        vk_reconnect_required = results.get("vk", {}).get("error_code") == 5
+        if vk_reconnect_required and not os.getenv("VK_USER_TOKEN", "").strip():
+            stored = secret_store.load()
+            stored["vk"]["access_token"] = ""
+            secret_store.save(stored)
         all_success = bool(results) and all(item.get("success") for item in results.values())
         status = "success" if all_success else "error"
         repository.update_result(post_id, status, results)
@@ -222,7 +257,12 @@ async def publish(
         )
         if all_success:
             return _dashboard_response(request, message=details)
-        return _dashboard_response(request, error=details, error_target="publish")
+        return _dashboard_response(
+            request,
+            error=details,
+            error_target="publish",
+            vk_reconnect_required=vk_reconnect_required,
+        )
     except Exception as exc:
         if post_id is not None:
             try:
@@ -262,10 +302,18 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
         try:
             await authenticate_platform("vk", stored, settings)
         except Exception as exc:
+            vk_reconnect_required = getattr(exc, "vk_code", None) == 5
+            if vk_reconnect_required and not os.getenv("VK_USER_TOKEN", "").strip():
+                stored["vk"]["access_token"] = ""
+                try:
+                    secret_store.save(stored)
+                except OSError:
+                    logging.getLogger(__name__).exception("Failed to clear invalid VK token")
             return _dashboard_response(
                 request,
                 error=f"Токен VK не сохранён: {exc}",
                 error_target="settings",
+                vk_reconnect_required=vk_reconnect_required,
             )
     try:
         secret_store.save(stored)
@@ -277,6 +325,31 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
             error_target="settings",
         )
     return _dashboard_response(request, message="Настройки сохранены.", settings_saved=True)
+
+
+@app.post("/settings/vk/reset", response_class=HTMLResponse)
+async def reset_vk_token(request: Request):  # type: ignore[no-untyped-def]
+    if not _authenticated(request):
+        return _login_redirect()
+    if os.getenv("VK_USER_TOKEN", "").strip():
+        return _dashboard_response(
+            request,
+            error="Токен VK задан через VK_USER_TOKEN. Удалите его из серверного .env и перезапустите сервис.",
+            error_target="settings",
+        )
+
+    stored = secret_store.load()
+    stored["vk"]["access_token"] = ""
+    try:
+        secret_store.save(stored)
+    except OSError as exc:
+        return _dashboard_response(
+            request,
+            error=f"Не удалось удалить токен VK: {exc}",
+            error_target="settings",
+        )
+    logging.getLogger(__name__).info("VK token removed from server storage")
+    return _dashboard_response(request, message="Токен VK удалён из кабинета.")
 
 
 @app.post("/posts/{post_id}/delete")
@@ -306,10 +379,12 @@ def _dashboard_response(
     error: str = "",
     error_target: str = "",
     settings_saved: bool = False,
+    vk_reconnect_required: bool = False,
 ):
     records = repository.recent(50)
     settings = Settings.load()
-    credentials = _credential_view(secret_store.load())
+    stored_credentials = secret_store.load()
+    credentials = _credential_view(stored_credentials)
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -322,6 +397,12 @@ def _dashboard_response(
             "records": records,
             "settings": settings,
             "credentials": credentials,
+            "vk_connected": bool(
+                os.getenv("VK_USER_TOKEN", "").strip()
+                or stored_credentials["vk"]["access_token"]
+            ),
+            "vk_env_managed": bool(os.getenv("VK_USER_TOKEN", "").strip()),
+            "vk_reconnect_required": vk_reconnect_required,
             "render_url": str(request.base_url).rstrip("/"),
             "vk_oauth_client_id": VK_OAUTH_CLIENT_ID,
             "vk_oauth_redirect_uri": VK_OAUTH_REDIRECT_URI,
@@ -383,9 +464,9 @@ def _merge_browser_credentials(
         if not isinstance(values, dict):
             continue
         for key in fields:
+            if platform == "vk" and key in {"access_token", "client_id"}:
+                continue
             value = values.get(key)
             if isinstance(value, str) and value.strip():
                 value = value.strip()
-                if platform == "vk" and key == "access_token":
-                    value = extract_vk_access_token(value)
                 fields[key] = value

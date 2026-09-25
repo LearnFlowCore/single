@@ -31,26 +31,37 @@
     <section class="settings panel">
       <div class="section-heading"><p class="eyebrow">Подключения</p><h2>Токены и сеть</h2></div>
       <p class="section-note">Токены используются только для публикации и не заменяют логин и пароль этой панели.</p>
-      <p class="browser-storage-note">После проверки подключения токены сохраняются в этом браузере и остаются доступны при следующем открытии приложения.</p>
+      <p class="browser-storage-note">Токен VK хранится только на сервере. Данные остальных подключений могут сохраняться в этом браузере.</p>
       {% if error and error_target == 'settings' %}<div class="notice error inline-notice" role="alert">{{ error }}</div>{% endif %}
       <form id="settings-form" method="post" action="/settings" autocomplete="off">
         {% for platform, name in platforms.items() %}
         <details {% if loop.first %}open{% endif %}><summary>{{ name }}</summary><div class="settings-grid">
           {% for field in credentials[platform] %}
-          {% if platform == 'vk' and vk_oauth_client_id and field.key in ['client_id', 'access_token'] %}
+          {% if platform == 'vk' and field.key == 'access_token' and (vk_connected or vk_reconnect_required) %}
+          <input id="vk-access_token" name="vk_access_token" type="hidden" value="" data-credential-platform="vk" data-credential-key="access_token">
+          {% elif platform == 'vk' and vk_oauth_client_id and field.key in ['client_id', 'access_token'] %}
           <input id="{{ platform }}-{{ field.key }}" name="{{ platform }}_{{ field.key }}" type="hidden" value="{{ vk_oauth_client_id if field.key == 'client_id' else '' }}" data-credential-platform="{{ platform }}" data-credential-key="{{ field.key }}">
           {% else %}
           <label>{{ field.label }}
-            <input id="{{ platform }}-{{ field.key }}" class="{{ 'masked-value' if field.secret else '' }}" name="{{ platform }}_{{ field.key }}" type="text" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-credential-platform="{{ platform }}" data-credential-key="{{ field.key }}" data-1p-ignore data-lpignore="true" data-bwignore placeholder="{{ 'Значение сохранено. Оставьте пустым без изменений' if field.saved else '' }}">
+            <input id="{{ platform }}-{{ field.key }}" class="{{ 'masked-value' if field.secret else '' }}" name="{{ platform }}_{{ field.key }}" type="text" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-credential-platform="{{ platform }}" data-credential-key="{{ field.key }}" data-1p-ignore data-lpignore="true" data-bwignore placeholder="{{ '' if platform == 'vk' and field.key == 'client_id' else ('Значение сохранено. Оставьте пустым без изменений' if field.saved else '') }}">
             <small>{{ field.hint }}</small>
           </label>
           {% endif %}
           {% endfor %}
           {% if platform == 'vk' %}
           <div class="token-help">
-            <strong>Вход через личный кабинет ВКонтакте</strong>
-            <p>Приложение VK подключено. Войдите в свой аккаунт и разрешите публикацию. Доступ сохранится автоматически.</p>
-            <button id="vk-oauth-button" class="button secondary" type="button">Войти через ВКонтакте</button>
+            <strong>Подключение личного аккаунта ВКонтакте</strong>
+            {% if vk_reconnect_required %}
+            <p><span class="status error">Требуется вход</span> {% if vk_env_managed %}Серверный токен недействителен. Удалите VK_USER_TOKEN из .env и перезапустите сервис.{% else %}Старый токен недействителен и удалён. Подключите ВКонтакте заново.{% endif %}</p>
+            {% elif vk_connected %}
+            <p><span class="status success">Подключён</span> Токен хранится на сервере и не выводится в кабинет.</p>
+            {% else %}
+            <p>Вставьте личный токен или полный URL с <code>access_token=...</code>. Для получения нового токена укажите ID активного Standalone-приложения. Все запросы к VK API выполняются только сервером.</p>
+            {% endif %}
+            {% if not vk_connected or (vk_reconnect_required and not vk_env_managed) %}<button id="vk-oauth-button" class="button secondary" type="button">Войти через ВКонтакте</button>{% endif %}
+            {% if vk_connected and not vk_reconnect_required %}
+            <button id="vk-reset-button" class="button secondary" type="submit" formaction="/settings/vk/reset" formmethod="post" {{ 'disabled' if vk_env_managed else '' }}>{{ 'Токен управляется сервером' if vk_env_managed else 'Сбросить токен VK' }}</button>
+            {% endif %}
             <p id="vk-oauth-error" class="form-error" role="alert" hidden></p>
           </div>
           {% endif %}
@@ -112,6 +123,10 @@
     const settingsFailed = {{ 'true' if error and error_target == 'settings' else 'false' }};
     let browserCredentials = {};
     try {
+      ['vk_token', 'vk_app_id', 'vk_client_id'].forEach((key) => {
+        localStorage.removeItem(key);
+        sessionStorage.removeItem(key);
+      });
       const savedDraft = localStorage.getItem(draftKey);
       if (savedDraft && !postText.value) postText.value = savedDraft;
       postText.addEventListener('input', () => {
@@ -126,6 +141,16 @@
       browserCredentials = storedValue && typeof storedValue === 'object' && !Array.isArray(storedValue) ? storedValue : {};
       const pendingValue = JSON.parse(sessionStorage.getItem(pendingCredentialsKey) || '{}');
       const pendingCredentials = pendingValue && typeof pendingValue === 'object' && !Array.isArray(pendingValue) ? pendingValue : {};
+      if (browserCredentials.vk) {
+        delete browserCredentials.vk.access_token;
+        delete browserCredentials.vk.client_id;
+        localStorage.setItem(credentialsKey, JSON.stringify(browserCredentials));
+      }
+      if (pendingCredentials.vk) {
+        delete pendingCredentials.vk.access_token;
+        delete pendingCredentials.vk.client_id;
+        sessionStorage.setItem(pendingCredentialsKey, JSON.stringify(pendingCredentials));
+      }
       if (settingsSaved) {
         Object.entries(pendingCredentials).forEach(([platform, values]) => {
           browserCredentials[platform] = {...(browserCredentials[platform] || {}), ...values};
@@ -147,17 +172,8 @@
           const platform = input.dataset.credentialPlatform;
           pending[platform] = pending[platform] || {};
           const key = input.dataset.credentialKey;
-          if (platform === 'vk' && key === 'access_token') {
-            try {
-              const parsed = new URL(value);
-              const hash = new URLSearchParams(parsed.hash.slice(1));
-              pending[platform][key] = hash.get('access_token') || value;
-            } catch (_) {
-              pending[platform][key] = value.replace(/^(?:access_)?token=/i, '').trim();
-            }
-          } else {
-            pending[platform][key] = value;
-          }
+          if (platform === 'vk' && ['access_token', 'client_id'].includes(key)) return;
+          pending[platform][key] = value;
         });
         sessionStorage.setItem(pendingCredentialsKey, JSON.stringify(pending));
       });
@@ -171,7 +187,15 @@
       }
     }
     const vkOauthButton = document.getElementById('vk-oauth-button');
-    vkOauthButton.addEventListener('click', () => {
+    const vkResetButton = document.getElementById('vk-reset-button');
+    if (vkResetButton && !vkResetButton.disabled) {
+      vkResetButton.addEventListener('click', (event) => {
+        if (!confirm('Сбросить токен ВКонтакте? Для публикации потребуется подключить аккаунт заново.')) {
+          event.preventDefault();
+        }
+      });
+    }
+    if (vkOauthButton) vkOauthButton.addEventListener('click', () => {
       const clientId = vkOauthClientId || document.getElementById('vk-client_id').value.trim();
       const oauthError = document.getElementById('vk-oauth-error');
       if (!/^\d+$/.test(clientId)) {
@@ -190,7 +214,7 @@
         redirect_uri: vkOauthRedirectUri,
         display: 'page',
         response_type: 'token',
-        v: '5.131',
+        v: '5.199',
         state
       });
       const popup = window.open(

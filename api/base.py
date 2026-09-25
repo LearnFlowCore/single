@@ -95,19 +95,20 @@ class SocialPlatform(abc.ABC):
                 _rewind_files(kwargs.get("files"))
                 response = await self._client.request(method, url, **kwargs)
             except httpx.RequestError as exc:
+                self._logger.warning(
+                    "%s network error method=%s url=%s error_type=%s attempt=%d/%d",
+                    operation,
+                    method,
+                    safe_url,
+                    type(exc).__name__,
+                    attempt,
+                    MAX_ATTEMPTS,
+                )
                 if attempt == MAX_ATTEMPTS:
                     raise APIError(
                         f"{operation}: сеть недоступна после {MAX_ATTEMPTS} попыток "
                         f"({type(exc).__name__}). Проверьте интернет, VPN или прокси."
                     ) from exc
-                self._logger.warning(
-                    "%s network error for %s %s; retrying (%d/%d)",
-                    operation,
-                    method,
-                    safe_url,
-                    attempt,
-                    MAX_ATTEMPTS,
-                )
                 await asyncio.sleep(2 ** (attempt - 1))
                 continue
 

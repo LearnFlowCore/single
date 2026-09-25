@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from fastapi.testclient import TestClient
@@ -101,34 +102,34 @@ class CoreTests(unittest.TestCase):
         self.assertIn("autoposter-vk-oauth", response.text)
         self.assertIn("http://158.160.237.113", response.text)
 
-    def test_browser_credentials_restore_token_for_publish(self) -> None:
+    def test_vk_token_reset_requires_login(self) -> None:
+        with TestClient(app) as client:
+            response = client.post("/settings/vk/reset", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/login")
+
+    def test_browser_credentials_cannot_override_vk_token_or_client_id(self) -> None:
         stored = SecretStore(Path("missing-secrets.json")).load()
-
-        _merge_browser_credentials(
-            stored,
-            json.dumps({"vk": {"access_token": "browser-token", "group_id": "123"}}),
-        )
-
-        self.assertEqual(stored["vk"]["access_token"], "browser-token")
-        self.assertEqual(stored["vk"]["group_id"], "123")
-
-    def test_browser_credentials_normalize_vk_redirect_url(self) -> None:
-        stored = SecretStore(Path("missing-secrets.json")).load()
+        stored["vk"]["access_token"] = "server-token"
+        stored["vk"]["client_id"] = "server-client-id"
 
         _merge_browser_credentials(
             stored,
             json.dumps(
                 {
                     "vk": {
-                        "access_token": (
-                            "https://oauth.vk.com/blank.html#access_token=browser-token&expires_in=0"
-                        )
+                        "access_token": "browser-token",
+                        "client_id": "browser-client-id",
+                        "group_id": "123",
                     }
                 }
             ),
         )
 
-        self.assertEqual(stored["vk"]["access_token"], "browser-token")
+        self.assertEqual(stored["vk"]["access_token"], "server-token")
+        self.assertEqual(stored["vk"]["client_id"], "server-client-id")
+        self.assertEqual(stored["vk"]["group_id"], "123")
 
     def test_direct_network_ignores_environment(self) -> None:
         network = resolve_network("direct")
@@ -232,13 +233,16 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_vk_text_request(self) -> None:
         calls: list[str] = []
+        wall_body = b""
 
         def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal wall_body
             calls.append(request.url.path)
             if request.url.path.endswith("users.get"):
                 return httpx.Response(200, json={"response": [{"id": 42}]})
             if request.url.path.endswith("account.getAppPermissions"):
                 return httpx.Response(200, json={"response": 8196})
+            wall_body = request.content
             return httpx.Response(200, json={"response": {"post_id": 7}})
 
         publisher = VKPublisher("token")
@@ -251,6 +255,21 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
                 calls,
                 ["/method/users.get", "/method/account.getAppPermissions", "/method/wall.post"],
             )
+            self.assertIn(b"owner_id=42", wall_body)
+            self.assertIn(b"v=5.199", wall_body)
+        finally:
+            await publisher.aclose()
+
+    async def test_vk_rejects_token_for_another_account(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"response": [{"id": 42}]})
+
+        publisher = VKPublisher("token", expected_user_id=200001271797)
+        await publisher._client.aclose()
+        publisher._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        try:
+            with self.assertRaisesRegex(AuthenticationError, "id200001271797"):
+                await publisher.authenticate()
         finally:
             await publisher.aclose()
 
@@ -261,6 +280,7 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
                 json={
                     "error": {
                         "error_code": 5,
+                        "error_subcode": 1130,
                         "error_msg": "User authorization failed: access_token was given to another ip address.",
                     }
                 },
@@ -270,8 +290,36 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
         await publisher._client.aclose()
         publisher._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         try:
-            with self.assertRaisesRegex(AuthenticationError, "another ip address"):
+            with self.assertRaisesRegex(AuthenticationError, "Запросы идут с сервера") as caught:
                 await publisher.authenticate()
+            self.assertEqual(getattr(caught.exception, "vk_code", None), 5)
+            self.assertEqual(getattr(caught.exception, "vk_subcode", None), 1130)
+        finally:
+            await publisher.aclose()
+
+    async def test_vk_retries_connection_reset_with_bounded_timeout(self) -> None:
+        attempts = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise httpx.ReadError("ECONNRESET", request=request)
+            return httpx.Response(200, json={"response": [{"id": 42}]})
+
+        publisher = VKPublisher("token")
+        await publisher._client.aclose()
+        publisher._client = httpx.AsyncClient(
+            timeout=publisher._client.timeout,
+            transport=httpx.MockTransport(handler),
+        )
+        try:
+            with patch("api.base.asyncio.sleep", new=AsyncMock()) as sleep:
+                result = await publisher._vk_call("users.get", {}, "VK authentication")
+            self.assertEqual(result["response"][0]["id"], 42)
+            self.assertEqual(attempts, 3)
+            self.assertEqual(sleep.await_count, 2)
+            self.assertEqual(publisher._client.timeout.read, 10.0)
         finally:
             await publisher.aclose()
 

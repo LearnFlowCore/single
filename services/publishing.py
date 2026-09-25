@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
 from api.instagram_publisher import InstagramPostData, InstagramPublisher
@@ -53,7 +54,12 @@ async def _publish_one(
         response = await publisher.publish(post)
         return platform, {"success": True, "url": _result_url(platform, response), "error": ""}
     except Exception as exc:
-        return platform, {"success": False, "url": "", "error": str(exc)}
+        return platform, {
+            "success": False,
+            "url": "",
+            "error": str(exc),
+            "error_code": getattr(exc, "vk_code", None),
+        }
     finally:
         if publisher is not None:
             await publisher.aclose()
@@ -71,7 +77,25 @@ def _build(
     if platform == "vk":
         values = secrets["vk"]
         group_id = int(values["group_id"]) if values["group_id"].strip() else None
-        return VKPublisher(values["access_token"], group_id=group_id, **common), VKPostData(
+        access_token = os.getenv("VK_USER_TOKEN", "").strip() or values["access_token"]
+        owner_id_text = os.getenv("VK_OWNER_ID", "").strip()
+        expected_user_id_text = os.getenv("VK_USER_ID", "").strip()
+        expected_user_id = int(expected_user_id_text) if expected_user_id_text else None
+        if owner_id_text:
+            owner_id = int(owner_id_text)
+            if owner_id == 0:
+                raise ValueError("VK_OWNER_ID не может быть равен нулю")
+            if owner_id > 0:
+                group_id = None
+                expected_user_id = owner_id
+            else:
+                group_id = abs(owner_id)
+        return VKPublisher(
+            access_token,
+            group_id=group_id,
+            expected_user_id=expected_user_id,
+            **common,
+        ), VKPostData(
             text=text, media=media_paths
         )
     if platform == "instagram":

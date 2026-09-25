@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import mimetypes
+import os
 import secrets
+import time
+import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -14,11 +18,38 @@ from utils.auth import extract_vk_access_token
 from .base import AuthenticationError, PostData, PublishError, SocialPlatform, require_success
 
 VK_API_URL = "https://api.vk.com/method"
-VK_API_VERSION = "5.131"
+VK_API_VERSION = os.getenv("VK_API_VERSION", "5.199")
 VK_PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif"}
 VK_SCOPE_PHOTOS = 4
 VK_SCOPE_WALL = 8192
 VK_UPLOAD_ATTEMPTS = 3
+VK_API_TIMEOUT = 10.0
+VK_UPLOAD_TIMEOUT = 60.0
+VK_REQUEST_INTERVAL = 1 / 3
+
+
+class _VKRateLimiter:
+    """Serialize VK API calls to the documented three requests per second."""
+
+    def __init__(self) -> None:
+        self._locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+            weakref.WeakKeyDictionary()
+        )
+        self._next_request: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, float] = (
+            weakref.WeakKeyDictionary()
+        )
+
+    async def wait(self) -> None:
+        loop = asyncio.get_running_loop()
+        lock = self._locks.setdefault(loop, asyncio.Lock())
+        async with lock:
+            delay = self._next_request.get(loop, 0.0) - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            self._next_request[loop] = time.monotonic() + VK_REQUEST_INTERVAL
+
+
+_VK_RATE_LIMITER = _VKRateLimiter()
 
 
 @dataclass(slots=True)
@@ -40,7 +71,8 @@ class VKPublisher(SocialPlatform):
         access_token: str,
         *,
         group_id: int | None = None,
-        timeout: float = 30.0,
+        expected_user_id: int | None = None,
+        timeout: float = VK_API_TIMEOUT,
         proxy: str | None = None,
         trust_env: bool = True,
     ) -> None:
@@ -49,9 +81,12 @@ class VKPublisher(SocialPlatform):
             raise ValueError("VK access_token is required")
         if group_id is not None and group_id <= 0:
             raise ValueError("VK group_id must be a positive integer")
+        if expected_user_id is not None and expected_user_id <= 0:
+            raise ValueError("VK expected_user_id must be a positive integer")
         super().__init__(timeout=timeout, proxy=proxy, trust_env=trust_env)
         self._access_token = access_token
         self.group_id = group_id
+        self.expected_user_id = expected_user_id
         self._user_id: int | None = None
 
     async def authenticate(self) -> Mapping[str, Any]:
@@ -62,6 +97,12 @@ class VKPublisher(SocialPlatform):
                 raise AuthenticationError("VK authentication returned no user")
             user = users[0]
             self._user_id = int(user["id"])
+            if self.expected_user_id is not None and self._user_id != self.expected_user_id:
+                raise AuthenticationError(
+                    "Токен VK принадлежит другому аккаунту: "
+                    f"ожидался id{self.expected_user_id}, получен id{self._user_id}."
+                )
+            self._logger.info("VK authentication succeeded user_id=%s", self._user_id)
             permissions = await self._vk_call(
                 "account.getAppPermissions", {}, "VK permissions check"
             )
@@ -107,6 +148,7 @@ class VKPublisher(SocialPlatform):
         try:
             attachments = [await self._upload_photo(Path(item)) for item in post.media]
             params: dict[str, Any] = {
+                "owner_id": self._user_id,
                 "message": post.text,
                 "random_id": secrets.randbits(31) or 1,
             }
@@ -119,7 +161,7 @@ class VKPublisher(SocialPlatform):
             if not isinstance(response, dict) or not response.get("post_id"):
                 raise PublishError("VK wall post returned an unexpected response")
             return response
-        except PublishError:
+        except (AuthenticationError, PublishError):
             raise
         except Exception as exc:
             raise PublishError(f"VK publishing failed: {exc}") from exc
@@ -142,6 +184,7 @@ class VKPublisher(SocialPlatform):
                     "POST",
                     str(server_data["upload_url"]),
                     operation="VK photo upload",
+                    timeout=VK_UPLOAD_TIMEOUT,
                     files={"photo": (path.name, source, mime_type)},
                 )
             uploaded = require_success(upload_response, "VK photo upload")
@@ -187,6 +230,7 @@ class VKPublisher(SocialPlatform):
     async def _vk_call(
         self, method: str, params: dict[str, Any], operation: str
     ) -> dict[str, Any]:
+        await _VK_RATE_LIMITER.wait()
         response = await self._request(
             "POST",
             f"{VK_API_URL}/{method}",
@@ -198,12 +242,34 @@ class VKPublisher(SocialPlatform):
         if isinstance(error, dict):
             message = error.get("error_msg") or "unknown VK API error"
             code = error.get("error_code")
+            subcode = error.get("error_subcode")
+            self._logger.warning(
+                "VK API error method=%s user_id=%s error_code=%s error_subcode=%s error_msg=%s",
+                method,
+                self._user_id if self._user_id is not None else "unknown",
+                code,
+                subcode,
+                message,
+            )
             if code == 5:
-                raise AuthenticationError(
+                if subcode == 1130 or "another ip address" in str(message).lower():
+                    exc = AuthenticationError(
+                        "Токен VK привязан к другому IP-адресу. Запросы идут с сервера; "
+                        "перевыпустите токен без VPN и IP-ограничения "
+                        "либо используйте токен сообщества. "
+                        f"Причина VK: {message}."
+                    )
+                    exc.vk_code = code  # type: ignore[attr-defined]
+                    exc.vk_subcode = subcode  # type: ignore[attr-defined]
+                    raise exc
+                exc = AuthenticationError(
                     "VK отклонил токен (ошибка 5). "
                     f"Причина VK: {message}. "
                     "Получите новый пользовательский токен standalone-приложения без привязки к IP."
                 )
+                exc.vk_code = code  # type: ignore[attr-defined]
+                exc.vk_subcode = subcode  # type: ignore[attr-defined]
+                raise exc
             if code == 7:
                 raise AuthenticationError("Токен VK не имеет нужных прав wall/photos.")
             if code == 15:
