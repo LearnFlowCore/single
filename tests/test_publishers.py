@@ -417,6 +417,22 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await publisher.aclose()
 
+    async def test_vk_rejects_personal_token_without_wall_and_photos(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("users.get"):
+                return httpx.Response(200, json={"response": [{"id": 42}]})
+            return httpx.Response(200, json={"response": 0})
+
+        publisher = VKPublisher("token")
+        await publisher._client.aclose()
+        publisher._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        try:
+            with self.assertRaisesRegex(AuthenticationError, "wall, photos") as caught:
+                await publisher.authenticate()
+            self.assertIn("нельзя добавить", str(caught.exception))
+        finally:
+            await publisher.aclose()
+
     async def test_vk_authentication_reports_api_reason(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
