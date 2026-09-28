@@ -35,11 +35,13 @@
       {% if error and error_target == 'settings' %}<div class="notice error inline-notice" role="alert">{{ error }}</div>{% endif %}
       <form id="settings-form" method="post" action="/settings" autocomplete="off">
         <input id="vk-oauth-code" name="vk_oauth_code" type="hidden" value="">
+        <input id="vk-oauth-token" name="vk_oauth_token" type="hidden" value="">
         <input id="vk-oauth-state" name="vk_oauth_state" type="hidden" value="">
         {% for platform, name in platforms.items() %}
         <details {% if loop.first %}open{% endif %}><summary>{{ name }}</summary><div class="settings-grid">
           {% for field in credentials[platform] %}
-          {% if platform == 'vk' and field.key == 'access_token' and (vk_connected or vk_reconnect_required) %}
+          {% if platform == 'vk' and field.key == 'group_id' %}
+          {% elif platform == 'vk' and field.key == 'access_token' and (vk_connected or vk_reconnect_required) %}
           <input id="vk-access_token" name="vk_access_token" type="hidden" value="" data-credential-platform="vk" data-credential-key="access_token">
           {% elif platform == 'vk' and vk_oauth_client_id and field.key == 'client_id' %}
           <input id="vk-client_id" name="vk_client_id" type="hidden" value="{{ vk_oauth_client_id }}" data-credential-platform="vk" data-credential-key="client_id">
@@ -61,7 +63,7 @@
             <p><span class="status success">Подключён</span> Токен хранится на сервере и не выводится в кабинет.</p>
             {% else %}
             <p>Вставьте личный <code>access_token</code>, выданный VK с правами <code>wall</code> и <code>photos</code>, и сохраните настройки. Если проверка прав выдаёт ошибку, сообщите маску ответа VK из сообщения об ошибке — сам токен отправлять не нужно.</p>
-            <p>Если у вас есть ID и защищённый ключ собственного приложения VK, воспользуйтесь кнопкой «Войти через ВКонтакте»: она запрашивает <code>wall,photos,offline</code>. После входа используйте выданный VK токен; не вставляйте вместо него ID или ключ приложения.</p>
+            <p>Укажите ID своего приложения VK и нажмите «Войти через ВКонтакте». В открывшемся окне войдите в личный аккаунт и разрешите доступ к стене и фотографиям. Токен из адресной строки копировать не нужно. Если у приложения есть защищённый ключ, укажите его для серверного обмена кода.</p>
             {% endif %}
             {% if not vk_connected or (vk_reconnect_required and not vk_env_managed) %}<button id="vk-oauth-button" class="button secondary" type="button">Войти через ВКонтакте</button>{% endif %}
             {% if vk_connected and not vk_reconnect_required %}
@@ -227,19 +229,15 @@
         oauthError.hidden = false;
         return;
       }
-      if (!vkOauthClientSecretConfigured && !clientSecret) {
-        oauthError.textContent = 'Сначала укажите защищённый ключ приложения VK.';
-        oauthError.hidden = false;
-        return;
-      }
       oauthError.hidden = true;
       sessionStorage.setItem(vkOauthStateKey, vkOauthState);
+      const useCodeFlow = vkOauthClientSecretConfigured || !!clientSecret;
       const query = new URLSearchParams({
         client_id: clientId,
         scope: 'wall,photos,offline',
         redirect_uri: vkOauthRedirectUri,
         display: 'page',
-        response_type: 'code',
+        response_type: useCodeFlow ? 'code' : 'token',
         v: '5.199',
         state: vkOauthState
       });
@@ -249,7 +247,7 @@
         'popup=yes,width=720,height=760'
       );
       if (!popup) {
-        oauthError.textContent = 'Яндекс.Браузер заблокировал окно авторизации. Разрешите всплывающие окна для этого сайта.';
+        oauthError.textContent = 'Браузер заблокировал окно авторизации. Разрешите всплывающие окна для этого сайта.';
         oauthError.hidden = false;
       }
     });
@@ -263,12 +261,13 @@
         return;
       }
       sessionStorage.removeItem(vkOauthStateKey);
-      if (event.data.error || !event.data.authorizationCode) {
-        oauthError.textContent = event.data.error || 'VK не вернул код авторизации.';
+      if (event.data.error || (!event.data.authorizationCode && !event.data.accessToken)) {
+        oauthError.textContent = event.data.error || 'VK не вернул разрешение для входа.';
         oauthError.hidden = false;
         return;
       }
-      document.getElementById('vk-oauth-code').value = event.data.authorizationCode;
+      if (event.data.authorizationCode) document.getElementById('vk-oauth-code').value = event.data.authorizationCode;
+      else document.getElementById('vk-oauth-token').value = event.data.accessToken;
       document.getElementById('vk-oauth-state').value = event.data.state;
       oauthError.hidden = true;
       if (settingsForm.requestSubmit) settingsForm.requestSubmit();

@@ -309,6 +309,7 @@ async def publish(
     try:
         credentials = secret_store.load()
         _merge_browser_credentials(credentials, browser_credentials)
+        credentials["vk"]["group_id"] = ""
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         for upload in media:
             if not upload.filename:
@@ -385,7 +386,8 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
     except ValueError as exc:
         return _dashboard_response(request, error=str(exc), error_target="settings")
     oauth_code = str(form.get("vk_oauth_code", "")).strip()
-    if oauth_code:
+    oauth_token = str(form.get("vk_oauth_token", "")).strip()
+    if oauth_code or oauth_token:
         oauth_state = str(form.get("vk_oauth_state", "")).strip()
         if not _valid_vk_oauth_state(oauth_state):
             return _dashboard_response(
@@ -393,18 +395,26 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
                 error="Не удалось подтвердить запрос авторизации VK. Повторите вход.",
                 error_target="settings",
             )
-        client_id = VK_OAUTH_CLIENT_ID.strip() or stored["vk"]["client_id"]
-        client_secret = VK_OAUTH_CLIENT_SECRET.strip() or stored["vk"]["client_secret"]
-        try:
-            stored["vk"]["access_token"] = await _exchange_vk_authorization_code(
-                oauth_code, client_id, client_secret, settings
-            )
-        except ValueError as exc:
+        if oauth_code and oauth_token:
             return _dashboard_response(
-                request, error=str(exc), error_target="settings"
+                request, error="Некорректный ответ авторизации VK.", error_target="settings"
             )
+        if oauth_token:
+            stored["vk"]["access_token"] = oauth_token
+        else:
+            client_id = VK_OAUTH_CLIENT_ID.strip() or stored["vk"]["client_id"]
+            client_secret = VK_OAUTH_CLIENT_SECRET.strip() or stored["vk"]["client_secret"]
+            try:
+                stored["vk"]["access_token"] = await _exchange_vk_authorization_code(
+                    oauth_code, client_id, client_secret, settings
+                )
+            except ValueError as exc:
+                return _dashboard_response(
+                    request, error=str(exc), error_target="settings"
+                )
         changed_credentials.add(("vk", "access_token"))
     if ("vk", "access_token") in changed_credentials:
+        stored["vk"]["group_id"] = ""
         try:
             await authenticate_platform("vk", stored, settings)
         except Exception as exc:
@@ -560,6 +570,8 @@ def _update_credentials(
     changed: set[tuple[str, str]] = set()
     for platform, fields in stored.items():
         for key in fields:
+            if platform == "vk" and key == "group_id":
+                continue
             value = str(form.get(f"{platform}_{key}", "")).strip()
             if platform == "vk" and key == "access_token" and value:
                 value = extract_vk_access_token(value)
@@ -588,7 +600,7 @@ def _merge_browser_credentials(
             continue
         for key in fields:
             if platform == "ok" or (
-                platform == "vk" and key in {"access_token", "client_id", "client_secret"}
+                platform == "vk" and key in {"access_token", "client_id", "client_secret", "group_id"}
             ):
                 continue
             value = values.get(key)

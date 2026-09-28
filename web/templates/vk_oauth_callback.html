@@ -16,9 +16,11 @@
     (() => {
       const targetOrigins = {{ target_origins|tojson }};
       const values = new URLSearchParams(window.location.search);
+      const fragment = new URLSearchParams(window.location.hash.slice(1));
       const authorizationCode = values.get('code');
-      const state = values.get('state');
-      const error = values.get('error_description') || values.get('error');
+      const accessToken = fragment.get('access_token');
+      const state = values.get('state') || fragment.get('state');
+      const error = values.get('error_description') || values.get('error') || fragment.get('error_description') || fragment.get('error');
       const status = document.getElementById('oauth-status');
       history.replaceState(null, '', window.location.pathname);
 
@@ -30,11 +32,12 @@
         type: 'autoposter-vk-oauth',
         state,
         authorizationCode,
-        error: error || (!authorizationCode ? 'VK не вернул код авторизации.' : '')
+        accessToken,
+        error: error || (!authorizationCode && !accessToken ? 'VK не вернул разрешение для входа.' : '')
       };
       targetOrigins.forEach((origin) => window.opener.postMessage(payload, origin));
       status.textContent = error ? 'ВКонтакте отклонил авторизацию.' : 'Вход выполнен. Это окно можно закрыть.';
-      if (!error && authorizationCode) setTimeout(() => window.close(), 700);
+      if (!error && (authorizationCode || accessToken)) setTimeout(() => window.close(), 700);
     })();
   </script>
 </body>

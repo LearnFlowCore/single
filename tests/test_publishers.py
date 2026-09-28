@@ -118,6 +118,12 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(stored["vk"]["access_token"], "personal-token")
         self.assertIn(("vk", "access_token"), changed)
 
+    def test_web_vk_settings_ignore_group_id(self) -> None:
+        stored = SecretStore(Path("missing-secrets.json")).load()
+        changed = _update_credentials(stored, {"vk_group_id": "123"})
+        self.assertEqual(stored["vk"]["group_id"], "")
+        self.assertNotIn(("vk", "group_id"), changed)
+
     def test_vk_oauth_callback_is_public_and_not_cached(self) -> None:
         with TestClient(app) as client:
             response = client.get("/vk/oauth/callback")
@@ -128,13 +134,48 @@ class CoreTests(unittest.TestCase):
         self.assertIn("http://158.160.237.113", response.text)
         self.assertIn("http://testserver", response.text)
         self.assertIn("authorizationCode", response.text)
-        self.assertNotIn("accessToken", response.text)
+        self.assertIn("new URLSearchParams(window.location.hash.slice(1))", response.text)
+        self.assertIn("history.replaceState", response.text)
+        self.assertIn("accessToken", response.text)
+
+    def test_vk_login_button_supports_personal_profile_without_app_secret(self) -> None:
+        with patch("web.app._authenticated", return_value=True), TestClient(app) as client:
+            dashboard = client.get("/dashboard")
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertIn("useCodeFlow ? 'code' : 'token'", dashboard.text)
+        self.assertIn('name="vk_oauth_token"', dashboard.text)
+        self.assertNotIn('name="vk_group_id"', dashboard.text)
 
     def test_vk_oauth_state_is_signed(self) -> None:
         state = _new_vk_oauth_state()
 
         self.assertTrue(_valid_vk_oauth_state(state))
         self.assertFalse(_valid_vk_oauth_state(f"{state}changed"))
+
+    def test_vk_popup_token_requires_valid_state_and_is_saved_server_side(self) -> None:
+        stored = SecretStore(Path("missing-secrets.json")).load()
+        stored["vk"]["group_id"] = "123"
+        state = _new_vk_oauth_state()
+        with (
+            patch("web.app._authenticated", return_value=True),
+            patch("web.app.secret_store.load", return_value=stored),
+            patch("web.app.secret_store.save") as save,
+            patch("web.app.authenticate_platform", new_callable=AsyncMock) as authenticate,
+            patch.object(Settings, "save"),
+            TestClient(app) as client,
+        ):
+            invalid = client.post("/settings", data={"vk_oauth_token": "popup-token", "vk_oauth_state": "invalid"})
+            self.assertIn("Не удалось подтвердить", invalid.text)
+            self.assertFalse(save.called)
+            self.assertFalse(authenticate.called)
+
+            valid = client.post("/settings", data={"vk_oauth_token": "popup-token", "vk_oauth_state": state})
+            self.assertIn("Настройки сохранены", valid.text)
+            self.assertEqual(stored["vk"]["access_token"], "popup-token")
+            self.assertEqual(stored["vk"]["group_id"], "")
+            self.assertTrue(save.called)
+            self.assertTrue(authenticate.called)
+            self.assertNotIn("popup-token", valid.text)
 
     def test_vk_token_reset_requires_login(self) -> None:
         with TestClient(app) as client:
@@ -166,7 +207,7 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(stored["vk"]["access_token"], "server-token")
         self.assertEqual(stored["vk"]["client_id"], "server-client-id")
         self.assertEqual(stored["vk"]["client_secret"], "server-client-secret")
-        self.assertEqual(stored["vk"]["group_id"], "123")
+        self.assertEqual(stored["vk"]["group_id"], "")
 
     def test_browser_credentials_cannot_override_ok_secrets(self) -> None:
         stored = SecretStore(Path("missing-secrets.json")).load()
