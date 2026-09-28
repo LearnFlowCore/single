@@ -64,6 +64,7 @@
             {% else %}
             <p>Вставьте личный <code>access_token</code>, выданный VK с правами <code>wall</code> и <code>photos</code>, и сохраните настройки. Если проверка прав выдаёт ошибку, сообщите маску ответа VK из сообщения об ошибке — сам токен отправлять не нужно.</p>
             <p>Укажите ID своего приложения VK и нажмите «Войти через ВКонтакте». В открывшемся окне войдите в личный аккаунт и разрешите доступ к стене и фотографиям. Токен из адресной строки копировать не нужно. Если у приложения есть защищённый ключ, укажите его для серверного обмена кода.</p>
+            <p>Для настройки откройте <a href="https://dev.vk.com/" target="_blank" rel="noopener noreferrer">кабинет разработчика VK</a> и разрешите в приложении адрес возврата <code>{{ vk_oauth_redirect_uri }}</code>. Достаточно публичного ID приложения.</p>
             {% endif %}
             {% if not vk_connected or (vk_reconnect_required and not vk_env_managed) %}<button id="vk-oauth-button" class="button secondary" type="button">Войти через ВКонтакте</button>{% endif %}
             {% if vk_connected and not vk_reconnect_required %}
