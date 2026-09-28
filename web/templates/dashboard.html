@@ -60,7 +60,7 @@
             {% elif vk_connected %}
             <p><span class="status success">Подключён</span> Токен хранится на сервере и не выводится в кабинет.</p>
             {% else %}
-            <p>Вставьте личный <code>access_token</code>, выданный VK с правами <code>wall</code> и <code>photos</code>, и сохраните настройки. Токен без этих прав нельзя исправить: его нужно выпустить заново, подтвердив оба разрешения. Токен сообщества или токен VK ID без прав на стену и фото не подойдёт.</p>
+            <p>Вставьте личный <code>access_token</code>, выданный VK с правами <code>wall</code> и <code>photos</code>, и сохраните настройки. Если проверка прав выдаёт ошибку, сообщите маску ответа VK из сообщения об ошибке — сам токен отправлять не нужно.</p>
             <p>Если у вас есть ID и защищённый ключ собственного приложения VK, воспользуйтесь кнопкой «Войти через ВКонтакте»: она запрашивает <code>wall,photos,offline</code>. После входа используйте выданный VK токен; не вставляйте вместо него ID или ключ приложения.</p>
             {% endif %}
             {% if not vk_connected or (vk_reconnect_required and not vk_env_managed) %}<button id="vk-oauth-button" class="button secondary" type="button">Войти через ВКонтакте</button>{% endif %}

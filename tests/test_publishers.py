@@ -429,7 +429,7 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
         try:
             with self.assertRaisesRegex(AuthenticationError, "wall, photos") as caught:
                 await publisher.authenticate()
-            self.assertIn("нельзя добавить", str(caught.exception))
+            self.assertIn("маска ответа: 0", str(caught.exception))
         finally:
             await publisher.aclose()
 

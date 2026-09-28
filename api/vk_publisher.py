@@ -114,10 +114,11 @@ class VKPublisher(SocialPlatform):
                 missing.append("photos")
             if missing:
                 raise AuthenticationError(
-                    "Токен VK не содержит прав: " + ", ".join(missing) + ". "
-                    "Эти права нельзя добавить к уже выданному токену. "
-                    "Получите новый пользовательский токен VK с разрешениями wall и photos "
-                    "для публикации на стене и загрузки фото."
+                    "Проверка VK account.getAppPermissions не подтвердила права "
+                    + ", ".join(missing)
+                    + f" (маска ответа: {permission_mask}). "
+                    "Если эти права были выбраны при выдаче токена, VK мог выдать их не полностью "
+                    "или метод проверки может не отражать права токена этого типа."
                 )
             group_name = ""
             if self.group_id is not None:
