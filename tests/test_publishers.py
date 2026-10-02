@@ -139,12 +139,24 @@ class CoreTests(unittest.TestCase):
         self.assertIn("accessToken", response.text)
 
     def test_vk_login_button_supports_personal_profile_without_app_secret(self) -> None:
-        with patch("web.app._authenticated", return_value=True), TestClient(app) as client:
+        with (
+            patch("web.app._authenticated", return_value=True),
+            patch("web.app.secret_store.load", return_value=SecretStore(Path("missing-secrets.json")).load()),
+            patch.dict("os.environ", {"VK_USER_TOKEN": ""}),
+            TestClient(app) as client,
+        ):
             dashboard = client.get("/dashboard")
         self.assertEqual(dashboard.status_code, 200)
         self.assertIn("useCodeFlow ? 'code' : 'token'", dashboard.text)
         self.assertIn('name="vk_oauth_token"', dashboard.text)
         self.assertNotIn('name="vk_group_id"', dashboard.text)
+        self.assertIn("Проверить и подключить токен VK", dashboard.text)
+        self.assertIn('href="https://vkhost.github.io/"', dashboard.text)
+        self.assertIn("Найти токен", dashboard.text)
+        self.assertIn("Отдельного окна «Разрешить приложению доступ»", dashboard.text)
+        self.assertIn("Не подключён", dashboard.text)
+        self.assertLess(dashboard.text.index('id="vk-access_token"'), dashboard.text.index('id="vk-client_id"'))
+        self.assertLess(dashboard.text.index('class="vk-oauth-options"'), dashboard.text.index('id="vk-client_id"'))
 
     def test_vk_oauth_state_is_signed(self) -> None:
         state = _new_vk_oauth_state()
@@ -164,6 +176,7 @@ class CoreTests(unittest.TestCase):
             patch.object(Settings, "save"),
             TestClient(app) as client,
         ):
+            authenticate.return_value = {"id": 42, "permissions_unconfirmed": ["wall", "photos"]}
             invalid = client.post("/settings", data={"vk_oauth_token": "popup-token", "vk_oauth_state": "invalid"})
             self.assertIn("Не удалось подтвердить", invalid.text)
             self.assertFalse(save.called)
@@ -171,6 +184,7 @@ class CoreTests(unittest.TestCase):
 
             valid = client.post("/settings", data={"vk_oauth_token": "popup-token", "vk_oauth_state": state})
             self.assertIn("Настройки сохранены", valid.text)
+            self.assertIn("публикация проверит их через VK API", valid.text)
             self.assertEqual(stored["vk"]["access_token"], "popup-token")
             self.assertEqual(stored["vk"]["group_id"], "")
             self.assertTrue(save.called)
@@ -183,6 +197,18 @@ class CoreTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/login")
+
+    def test_vk_connect_without_token_reports_error_and_does_not_save(self) -> None:
+        with (
+            patch("web.app._authenticated", return_value=True),
+            patch("web.app.secret_store.save") as save,
+            TestClient(app) as client,
+        ):
+            response = client.post("/settings", data={"vk_connect": "1"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Вставьте личный токен VK", response.text)
+        self.assertNotIn("Настройки сохранены.", response.text)
+        save.assert_not_called()
 
     def test_browser_credentials_cannot_override_vk_token_or_client_id(self) -> None:
         stored = SecretStore(Path("missing-secrets.json")).load()
@@ -458,19 +484,46 @@ class PublisherTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await publisher.aclose()
 
-    async def test_vk_rejects_personal_token_without_wall_and_photos(self) -> None:
+    async def test_vk_can_publish_when_permission_mask_is_incomplete(self) -> None:
+        calls: list[str] = []
+
         def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request.url.path)
             if request.url.path.endswith("users.get"):
                 return httpx.Response(200, json={"response": [{"id": 42}]})
-            return httpx.Response(200, json={"response": 0})
+            if request.url.path.endswith("account.getAppPermissions"):
+                return httpx.Response(200, json={"response": 0})
+            return httpx.Response(200, json={"response": {"post_id": 7}})
 
         publisher = VKPublisher("token")
         await publisher._client.aclose()
         publisher._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         try:
-            with self.assertRaisesRegex(AuthenticationError, "wall, photos") as caught:
-                await publisher.authenticate()
-            self.assertIn("маска ответа: 0", str(caught.exception))
+            account = await publisher.authenticate()
+            self.assertEqual(account["permissions_unconfirmed"], ["wall", "photos"])
+            result = await publisher.publish(VKPostData(text="Тест"))
+            self.assertEqual(result["post_id"], 7)
+            self.assertEqual(calls[-1], "/method/wall.post")
+        finally:
+            await publisher.aclose()
+
+    async def test_vk_reports_missing_rights_from_actual_post(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("users.get"):
+                return httpx.Response(200, json={"response": [{"id": 42}]})
+            if request.url.path.endswith("account.getAppPermissions"):
+                return httpx.Response(200, json={"response": 0})
+            return httpx.Response(
+                200,
+                json={"error": {"error_code": 7, "error_msg": "Permission to perform this action is denied"}},
+            )
+
+        publisher = VKPublisher("token")
+        await publisher._client.aclose()
+        publisher._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        try:
+            with self.assertRaisesRegex(AuthenticationError, "wall/photos"):
+                await publisher.publish(VKPostData(text="Тест"))
         finally:
             await publisher.aclose()
 

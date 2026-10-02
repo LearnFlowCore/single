@@ -55,9 +55,9 @@ PLATFORMS = {
 }
 CREDENTIAL_FIELDS = {
     "vk": [
+        ("access_token", "Личный токен VK", "Вставьте готовый личный токен с правами wall и photos. После сохранения он не отображается."),
         ("client_id", "ID приложения VK", "ID OAuth-приложения из кабинета разработчика VK."),
         ("client_secret", "Защищённый ключ VK", "Защищённый ключ приложения из кабинета разработчика VK."),
-        ("access_token", "Личный токен VK", "Токен получается сервером после входа через VK и не отображается."),
         ("group_id", "ID группы", "Числовой ID без минуса; оставьте пустым для своей страницы."),
     ],
     "ok": [
@@ -371,6 +371,12 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
     if not _authenticated(request):
         return _login_redirect()
     form = await request.form()
+    if form.get("vk_connect") and not str(form.get("vk_access_token", "")).strip():
+        return _dashboard_response(
+            request,
+            error="Вставьте личный токен VK в поле выше. Вход в VK в браузере не передаёт токен кабинету.",
+            error_target="settings",
+        )
     stored = secret_store.load()
     try:
         changed_credentials = _update_credentials(stored, form)
@@ -416,7 +422,7 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
     if ("vk", "access_token") in changed_credentials:
         stored["vk"]["group_id"] = ""
         try:
-            await authenticate_platform("vk", stored, settings)
+            vk_account = await authenticate_platform("vk", stored, settings)
         except Exception as exc:
             vk_reconnect_required = getattr(exc, "vk_code", None) == 5
             if vk_reconnect_required and not os.getenv("VK_USER_TOKEN", "").strip():
@@ -449,7 +455,10 @@ async def save_settings(request: Request):  # type: ignore[no-untyped-def]
             error=f"Не удалось сохранить настройки на сервере: {exc}",
             error_target="settings",
         )
-    return _dashboard_response(request, message="Настройки сохранены.", settings_saved=True)
+    message = "Настройки сохранены."
+    if ("vk", "access_token") in changed_credentials and vk_account.get("permissions_unconfirmed"):
+        message += " VK подтвердил личный аккаунт, но не подтвердил права по маске; публикация проверит их через VK API."
+    return _dashboard_response(request, message=message, settings_saved=True)
 
 
 @app.post("/settings/vk/reset", response_class=HTMLResponse)

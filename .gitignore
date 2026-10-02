@@ -11,3 +11,8 @@ logs/
 config/secrets.json
 .env
 .env.*
+android/.gradle/
+android/.idea/
+android/local.properties
+android/**/build/
+android/*.keystore

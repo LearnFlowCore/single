@@ -113,12 +113,11 @@ class VKPublisher(SocialPlatform):
             if not permission_mask & VK_SCOPE_PHOTOS:
                 missing.append("photos")
             if missing:
-                raise AuthenticationError(
-                    "Проверка VK account.getAppPermissions не подтвердила права "
-                    + ", ".join(missing)
-                    + f" (маска ответа: {permission_mask}). "
-                    "Если эти права были выбраны при выдаче токена, VK мог выдать их не полностью "
-                    "или метод проверки может не отражать права токена этого типа."
+                self._logger.warning(
+                    "VK permissions check did not confirm scopes=%s mask=%s; "
+                    "publishing methods will validate permissions",
+                    ",".join(missing),
+                    permission_mask,
                 )
             group_name = ""
             if self.group_id is not None:
@@ -136,6 +135,7 @@ class VKPublisher(SocialPlatform):
                 "first_name": user.get("first_name", ""),
                 "last_name": user.get("last_name", ""),
                 "group": group_name,
+                "permissions_unconfirmed": missing,
             }
         except AuthenticationError:
             raise

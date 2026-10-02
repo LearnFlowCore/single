@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Панель · Окно в другой мир</title>
-  <link rel="stylesheet" href="/static/site.css">
+  <link rel="stylesheet" href="/static/site.css?v=vk-connect-20260928-2">
 </head>
 <body class="admin-page">
   <header class="admin-header">
@@ -41,36 +41,47 @@
         <details {% if loop.first %}open{% endif %}><summary>{{ name }}</summary><div class="settings-grid">
           {% for field in credentials[platform] %}
           {% if platform == 'vk' and field.key == 'group_id' %}
-          {% elif platform == 'vk' and field.key == 'access_token' and (vk_connected or vk_reconnect_required) %}
+          {% elif platform == 'vk' and field.key == 'access_token' and vk_connected and not vk_reconnect_required %}
           <input id="vk-access_token" name="vk_access_token" type="hidden" value="" data-credential-platform="vk" data-credential-key="access_token">
           {% elif platform == 'vk' and vk_oauth_client_id and field.key == 'client_id' %}
           <input id="vk-client_id" name="vk_client_id" type="hidden" value="{{ vk_oauth_client_id }}" data-credential-platform="vk" data-credential-key="client_id">
           {% elif platform == 'vk' and vk_oauth_env_client_secret and field.key == 'client_secret' %}
           <input id="vk-client_secret" name="vk_client_secret" type="hidden" value="" data-credential-platform="vk" data-credential-key="client_secret">
+          {% elif platform == 'vk' and field.key in ['client_id', 'client_secret'] %}
           {% else %}
           <label>{{ field.label }}
             <input id="{{ platform }}-{{ field.key }}" class="{{ 'masked-value' if field.secret else '' }}" name="{{ platform }}_{{ field.key }}" type="text" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-credential-platform="{{ platform }}" data-credential-key="{{ field.key }}" data-1p-ignore data-lpignore="true" data-bwignore placeholder="{{ '' if platform == 'vk' and field.key == 'client_id' else ('Значение сохранено. Оставьте пустым без изменений' if field.saved else '') }}">
+            {% if platform == 'vk' and field.key == 'access_token' %}<a class="token-find-link" href="https://vkhost.github.io/" target="_blank" rel="noopener noreferrer">Найти токен ↗</a>{% endif %}
             <small>{{ field.hint }}</small>
           </label>
           {% endif %}
           {% endfor %}
           {% if platform == 'vk' %}
-          <div class="token-help">
-            <strong>Подключение личного аккаунта ВКонтакте</strong>
+          <div class="token-help vk-connect-card">
+            <div class="vk-connect-heading"><span class="vk-connect-mark" aria-hidden="true">VK</span><div><strong>Личный профиль ВКонтакте</strong><p>Публикация в ваш профиль через личный токен</p></div></div>
             {% if vk_reconnect_required %}
-            <p><span class="status error">Требуется вход</span> {% if vk_env_managed %}Серверный токен недействителен. Удалите VK_USER_TOKEN из .env и перезапустите сервис.{% else %}Старый токен недействителен и удалён. Подключите ВКонтакте заново.{% endif %}</p>
+            <p><span class="status error">Токен отклонён</span> {% if vk_env_managed %}Серверный токен отклонён VK. Проверьте причину в сообщении об ошибке.{% else %}VK отклонил токен при запросе с сервера. Причина указана выше; повторять вход в VK для проверки не нужно.{% endif %}</p>
             {% elif vk_connected %}
-            <p><span class="status success">Подключён</span> Токен хранится на сервере и не выводится в кабинет.</p>
+            <p><span class="status success">Токен сохранён</span> Токен хранится на сервере и не выводится в кабинет. Права на запись VK проверяет при публикации.</p>
             {% else %}
-            <p>Вставьте личный <code>access_token</code>, выданный VK с правами <code>wall</code> и <code>photos</code>, и сохраните настройки. Если проверка прав выдаёт ошибку, сообщите маску ответа VK из сообщения об ошибке — сам токен отправлять не нужно.</p>
-            <p>Укажите ID своего приложения VK и нажмите «Войти через ВКонтакте». В открывшемся окне войдите в личный аккаунт и разрешите доступ к стене и фотографиям. Токен из адресной строки копировать не нужно. Если у приложения есть защищённый ключ, укажите его для серверного обмена кода.</p>
-            <p>Для настройки откройте <a href="https://dev.vk.com/" target="_blank" rel="noopener noreferrer">кабинет разработчика VK</a> и разрешите в приложении адрес возврата <code>{{ vk_oauth_redirect_uri }}</code>. Достаточно публичного ID приложения.</p>
+            <p><span class="status error">Не подключён</span> Вход в VK в браузере и подключение к этому кабинету — разные действия. Для кабинета требуется личный токен, который VK разрешит использовать с IP-адреса сервера.</p>
+            <ol class="vk-connect-steps"><li>Получите личный токен VK с правами <code>wall</code> и <code>photos</code>.</li><li>Вставьте токен в поле выше.</li><li>Нажмите кнопку ниже: сервер проверит личный аккаунт и сохранит токен.</li></ol>
+            <p class="vk-connect-note">Отдельного окна «Разрешить приложению доступ» при вводе готового токена не будет: доступ уже разрешён приложению, выдавшему токен. Права на публикацию окончательно проверит VK при отправке поста.</p>
             {% endif %}
-            {% if not vk_connected or (vk_reconnect_required and not vk_env_managed) %}<button id="vk-oauth-button" class="button secondary" type="button">Войти через ВКонтакте</button>{% endif %}
+            {% if not vk_connected and not vk_env_managed %}<button class="button primary vk-connect-action" type="submit" name="vk_connect" value="1">Проверить и подключить токен VK</button>{% endif %}
             {% if vk_connected and not vk_reconnect_required %}
             <button id="vk-reset-button" class="button secondary" type="submit" formaction="/settings/vk/reset" formmethod="post" {{ 'disabled' if vk_env_managed else '' }}>{{ 'Токен управляется сервером' if vk_env_managed else 'Сбросить токен VK' }}</button>
             {% endif %}
-            <p id="vk-oauth-error" class="form-error" role="alert" hidden></p>
+            {% if not vk_connected or (vk_reconnect_required and not vk_env_managed) %}
+            <details class="vk-oauth-options"><summary>Есть собственное приложение VK? Войти через VK OAuth</summary>
+              <p>Для отдельного разрешения доступа именно этому сайту требуется ID вашего VK-приложения и разрешённый адрес возврата <code>{{ vk_oauth_redirect_uri }}</code>. Настройте его в <a href="https://dev.vk.com/" target="_blank" rel="noopener noreferrer">кабинете разработчика VK</a>.</p>
+              {% for field in credentials.vk if (field.key == 'client_id' and not vk_oauth_client_id) or (field.key == 'client_secret' and not vk_oauth_env_client_secret) %}
+              <label>{{ field.label }}<input id="vk-{{ field.key }}" class="{{ 'masked-value' if field.secret else '' }}" name="vk_{{ field.key }}" type="text" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-credential-platform="vk" data-credential-key="{{ field.key }}" data-1p-ignore data-lpignore="true" data-bwignore placeholder="{{ 'Значение сохранено. Оставьте пустым без изменений' if field.saved else '' }}"><small>{{ field.hint }}</small></label>
+              {% endfor %}
+              <button id="vk-oauth-button" class="button secondary" type="button">Войти через ВКонтакте</button>
+              <p id="vk-oauth-error" class="form-error" role="alert" hidden></p>
+            </details>
+            {% endif %}
           </div>
           {% elif platform == 'ok' %}
           <div class="token-help">

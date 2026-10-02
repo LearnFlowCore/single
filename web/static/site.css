@@ -79,6 +79,16 @@ details[open]>summary::after { transform:rotate(45deg); }
 .masked-value { -webkit-text-security:disc; }
 .token-help { padding:15px; background:#090b0e; border:1px solid #51471f; border-radius:11px; }
 .token-help strong { font-size:13px; }.token-help p { margin:7px 0 13px; color:var(--muted); font-size:12px; line-height:1.55; }.token-help .button { width:100%; }.token-help .form-error { margin:10px 0 0; color:var(--yellow); opacity:1; }
+.vk-connect-card { padding:18px; background:linear-gradient(150deg,#181d27,#0a0c10); border-color:#ffd84d55; }
+.vk-connect-heading { display:flex; align-items:center; gap:12px; padding-bottom:13px; border-bottom:1px solid #ffd84d25; }
+.vk-connect-heading strong { color:var(--yellow); font-size:15px; }.vk-connect-heading p { margin:2px 0 0; }
+.vk-connect-mark { flex:0 0 auto; width:38px; height:38px; display:grid; place-items:center; color:#fff; background:#0077ff; border-radius:10px; font-size:13px; font-weight:900; }
+.vk-connect-steps { margin:15px 0; padding-left:24px; color:var(--yellow-soft); font-size:12px; line-height:1.6; }.vk-connect-steps li { padding-left:3px; margin-bottom:7px; }.vk-connect-steps li::marker { color:var(--yellow); font-weight:900; }
+.vk-connect-card .vk-connect-note { margin:14px 0; padding:11px 12px; background:#ffd84d0c; border-left:3px solid var(--yellow); border-radius:7px; }
+.vk-connect-card .vk-connect-action { margin-top:5px; }
+.token-find-link { justify-self:start; margin-top:-2px; color:var(--yellow); font-size:12px; font-weight:800; text-decoration:underline; text-underline-offset:3px; }
+.token-find-link:hover { color:#fff0a8; }
+.vk-oauth-options { margin-top:16px; border-top:1px solid #ffd84d25; border-bottom:0; }.vk-oauth-options summary { padding:14px 25px 3px 0; color:var(--muted); font-size:12px; }.vk-oauth-options summary::after { top:14px; }.vk-oauth-options label { margin-top:12px; }.vk-oauth-options .button { margin-top:14px; }
 .render-address { margin:0; padding:12px 14px; color:var(--muted); background:#090b0e; border:1px solid #51471f; border-radius:11px; font-size:12px; line-height:1.5; }
 .render-address a { color:var(--yellow); text-decoration:underline; text-underline-offset:3px; overflow-wrap:anywhere; }
 .settings form>.button { width:100%; margin-top:20px; }

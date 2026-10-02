@@ -1,0 +1,16 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'ru.oknovdrugoymir.autoposter'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'ru.oknovdrugoymir.autoposter'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+}
